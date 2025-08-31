@@ -1,10 +1,14 @@
-export async function fetchUsernameForWallet(wallet: string) {
-  const base = process.env.GAMES_ID_USERNAME_CHECK!;
-  const url = `${base}?wallet=${wallet}`;
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error("username-check-failed");
-  return r.json() as Promise<{
-    hasUsername: boolean;
-    user?: { id: number; username: string; walletAddress: string };
-  }>;
+export type UsernameResponse = {
+  hasUsername: boolean;
+  user?: { id: number; username: string; walletAddress: string };
+};
+
+export async function fetchUsernameForWallet(wallet: string): Promise<UsernameResponse> {
+  const res = await fetch(`/api/check-username?wallet=${encodeURIComponent(wallet)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`check-username failed: ${res.status}`);
+  }
+  return res.json();
 }

@@ -2,25 +2,30 @@
 
 import { useEffect, useState } from "react";
 import ClassicPacman from "@/components/pacman/ClassicPacman";
-import GamesIdBar from "@/components/GamesIdBar"; // bar login yang sudah kamu punya
+import GamesIdBar from "@/components/GamesIdBar";
 import { fetchUsernameForWallet } from "@/lib/gamesId";
 
 export default function GamePage() {
   const [wallet, setWallet] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  const [userErr, setUserErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Ambil username saat wallet tersedia
   useEffect(() => {
     let cancel = false;
     (async () => {
+      setUserErr(null);
       if (!wallet) { setUsername(null); return; }
       try {
         const res = await fetchUsernameForWallet(wallet);
         if (cancel) return;
-        setUsername(res.hasUsername ? res.user?.username ?? null : null);
+        setUsername(res.hasUsername && res.user?.username ? res.user.username : null);
       } catch {
-        if (!cancel) setUsername(null);
+        if (!cancel) {
+          setUsername(null);
+          setUserErr("Failed to check username");
+        }
       }
     })();
     return () => { cancel = true; };
@@ -40,13 +45,13 @@ export default function GamePage() {
 
   return (
     <main className="max-w-5xl mx-auto p-4 space-y-4">
-      <GamesIdBar onWallet={setWallet} onUsername={(u)=>setUsername(u)} />
+      <GamesIdBar onWallet={setWallet} onUsername={setUsername} />
+      {userErr && <p className="text-xs text-red-400">{userErr}</p>}
 
       <ClassicPacman
         wallet={wallet}
         username={username}
         onScoreSubmit={handleSubmitScore}
-        // rootAssetBase default mengarah ke repo sumber audio (seperti HTML-mu)
       />
 
       {submitting && <p className="text-xs text-neutral-400">Submitting score…</p>}

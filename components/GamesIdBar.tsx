@@ -1,80 +1,47 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import LoginGamesID from "./LoginGamesID";
-import { fetchUsernameForWallet } from "@/lib/gamesId";
+import { useEffect } from "react";
+import { usePrivy, CrossAppAccountWithMetadata } from "@privy-io/react-auth";
 
 export default function GamesIdBar({
   onWallet,
   onUsername,
 }: {
-  onWallet: (w: string | null) => void;
-  onUsername: (u: string | null) => void;
+  onWallet: (addr: string | null) => void;
+  onUsername?: (u: string | null) => void;
 }) {
-  const [wallet, setWallet] = useState<string | null>(null);
-  const [username, setUsername] = useState<string | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => { onWallet(wallet); }, [wallet, onWallet]);
-  useEffect(() => { onUsername(username ?? null); }, [username, onUsername]);
+  const { authenticated, user, ready, login, logout } = usePrivy();
 
   useEffect(() => {
-    let canceled = false;
-    (async () => {
-      setError(null);
-      if (!wallet) { setUsername(undefined); return; }
-      try {
-        setUsername(undefined); // loading
-        const res = await fetchUsernameForWallet(wallet);
-        if (canceled) return;
-        if (res.hasUsername && res.user?.username) {
-          setUsername(res.user.username);
-        } else {
-          setUsername(null);
-        }
-      } catch {
-        if (!canceled) { setError("Failed to check username"); setUsername(undefined); }
-      }
-    })();
-    return () => { canceled = true; };
-  }, [wallet]);
+    if (!ready) return;
+    if (!authenticated || !user) {
+      onWallet(null);
+      onUsername?.(null);
+      return;
+    }
+    const cross = user.linkedAccounts.find(
+      (a) => a.type === "cross_app" && (a as CrossAppAccountWithMetadata).providerApp?.id === "cmd8euall0037le0my79qpz42"
+    ) as CrossAppAccountWithMetadata | undefined;
 
-  const handleReserve = () => {
-    window.open("https://monad-games-id-site.vercel.app/", "_blank", "noopener,noreferrer");
-  };
+    const addr = cross?.embeddedWallets?.[0]?.address ?? null;
+    onWallet(addr ?? null);
+    // username akan di-fetch di page; tapi kalau mau, bisa panggil fetch di sini dan kirim onUsername
+  }, [authenticated, user, ready, onWallet, onUsername]);
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <LoginGamesID onWallet={setWallet} />
-
-      {wallet && (
-        <>
-          {username === undefined && !error && (
-            <div className="px-3 py-1 rounded bg-neutral-800">Checking username…</div>
-          )}
-
-          {typeof username === "string" && (
-            <div className="px-3 py-1 rounded bg-neutral-800">
-              Logged in as <b>@{username}</b>
-            </div>
-          )}
-
-          {username === null && (
-            <button
-              onClick={handleReserve}
-              className="px-3 py-1 rounded bg-yellow-400 text-black hover:bg-yellow-300"
-            >
-              Reserve your Monad Games ID username
-            </button>
-          )}
-
-          {error && (
-            <div className="px-3 py-1 rounded bg-red-600/30 border border-red-600/50 text-red-200">
-              {error}
-            </div>
-          )}
-        </>
-      )}
+    <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
+      <div className="text-sm text-neutral-300">Sign in with Monad Games ID</div>
+      <div className="flex items-center gap-2">
+        {authenticated ? (
+          <button onClick={logout} className="px-3 py-1 text-sm rounded bg-neutral-800 hover:bg-neutral-700">
+            Logout
+          </button>
+        ) : (
+          <button onClick={login} className="px-3 py-1 text-sm rounded bg-yellow-400 text-black hover:bg-yellow-300">
+            Sign In
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-/** ==== Constants & Types (ported, tanpa 'any') ==== */
+/** ==== Constants & Types ==== */
 const NONE = 4,
   UP = 3,
   LEFT = 2,
@@ -21,12 +21,6 @@ type AudioFileMap = {
   [name: string]: HTMLAudioElement;
 };
 
-type TickProvider = { getTick: () => number };
-type UserAPIs = {
-  completedLevel: () => void;
-  eatenPill: () => void;
-};
-
 const KEY = {
   ARROW_LEFT: 37,
   ARROW_UP: 38,
@@ -39,7 +33,7 @@ const KEY = {
 
 const FPS = 30;
 
-/** ==== MAP data (UI & logic dari kode kamu) ==== */
+/** ==== MAP data ==== */
 const WALL = 0;
 const BISCUIT = 1;
 const EMPTY = 2;
@@ -116,11 +110,12 @@ const clone2D = (src: number[][]) => src.map((r) => r.slice());
 const within = (h: number, w: number, y: number, x: number) =>
   y >= 0 && y < h && x >= 0 && x < w;
 
-/** ==== Audio (ported) ==== */
+/** ==== Audio ==== */
 function useAudioManager(rootBase: string) {
   const filesRef = useRef<AudioFileMap>({});
   const playingRef = useRef<string[]>([]);
-  const soundDisabled = () => typeof window !== "undefined" && localStorage.getItem("soundDisabled") === "true";
+  const soundDisabled = () =>
+    typeof window !== "undefined" && localStorage.getItem("soundDisabled") === "true";
 
   const load = (name: string, path: string, onReady: () => void) => {
     const a = document.createElement("audio");
@@ -196,11 +191,11 @@ function useAudioManager(rootBase: string) {
   return { loadAll, play, pause, resume, disable };
 }
 
-/** ==== ClassicPacman component ==== */
+/** ==== Component ==== */
 export default function ClassicPacman({
   wallet,
   username,
-  onScoreSubmit, // dipanggil saat game over (auto submit)
+  onScoreSubmit,
   rootAssetBase = "https://raw.githubusercontent.com/daleharvey/pacman/master/",
 }: {
   wallet: string | null;
@@ -215,6 +210,11 @@ export default function ClassicPacman({
   const [lives, setLives] = useState<number>(3);
   const [loaded, setLoaded] = useState<boolean>(false);
 
+  const isMobile = useMemo(
+    () => (typeof window !== "undefined" ? window.matchMedia("(pointer: coarse)").matches : false),
+    []
+  );
+
   // game internals
   const tickRef = useRef(0);
   const timerRef = useRef<number | null>(null);
@@ -226,7 +226,7 @@ export default function ClassicPacman({
   // map/grid
   const mapRef = useRef(clone2D(MAP_DATA));
   const pillPulseRef = useRef(0);
-  const blockSizeRef = useRef(18); // responsive di mount
+  const blockSizeRef = useRef(18);
 
   // entities
   const userPosRef = useRef<Vec>({ x: 90, y: 120 });
@@ -247,7 +247,7 @@ export default function ClassicPacman({
   // audio
   const audio = useAudioManager(rootAssetBase);
 
-  /** == Helpers dari game-mu == */
+  /** Utils */
   const getTick = () => tickRef.current;
   const pointToCoord = (x: number) => Math.round(x / 10);
   const onWhole = (x: number) => x % 10 === 0;
@@ -271,7 +271,7 @@ export default function ClassicPacman({
     return v === EMPTY || v === BISCUIT || v === PILL;
   };
 
-  /** == Drawing == */
+  /** Drawing */
   const drawWalls = (ctx: CanvasRenderingContext2D) => {
     const s = blockSizeRef.current;
     ctx.strokeStyle = "#0000FF";
@@ -295,7 +295,7 @@ export default function ClassicPacman({
   const drawBlock = (y: number, x: number, ctx: CanvasRenderingContext2D) => {
     const layout = mapRef.current[y][x];
     const s = blockSizeRef.current;
-    if (layout === PILL) return; // pill digambar terpisah (blink)
+    if (layout === PILL) return;
     ctx.beginPath();
     if (layout === EMPTY || layout === BLOCK || layout === BISCUIT) {
       ctx.fillStyle = "#000";
@@ -349,7 +349,6 @@ export default function ClassicPacman({
     ctx.fillStyle = "#000";
     ctx.fillRect(0, top, wPx, 30);
 
-    // Lives (ikon pac)
     ctx.fillStyle = "#FFFF00";
     for (let i = 0; i < lives; i++) {
       ctx.beginPath();
@@ -360,13 +359,11 @@ export default function ClassicPacman({
       ctx.fill();
     }
 
-    // Sound (indikator)
     const soundOff = typeof window !== "undefined" && localStorage.getItem("soundDisabled") === "true";
     ctx.fillStyle = !soundOff ? "#00FF00" : "#FF0000";
     ctx.font = "bold 16px sans-serif";
     ctx.fillText("s", 10, textBase);
 
-    // Score & Level
     ctx.fillStyle = "#FFFF00";
     ctx.font = "14px Calibri, Arial, sans-serif";
     ctx.fillText(`Score: ${score}`, 30, textBase);
@@ -410,12 +407,12 @@ export default function ClassicPacman({
     ctx.fill();
   };
 
-  const drawGhost = (ctx: CanvasRenderingContext2D, g: Ghost) => {
+  type GhostT = ReturnType<typeof drawGhost>;
+  function drawGhost(ctx: CanvasRenderingContext2D, g: Ghost) {
     const s = blockSizeRef.current;
     const top = (g.pos.y / 10) * s;
     const left = (g.pos.x / 10) * s;
 
-    // vulnerable color logic
     const secondsAgo = (tick: number | null) =>
       tick === null ? Number.MAX_SAFE_INTEGER : (getTick() - tick) / FPS;
     const eatable = g.eatableTick !== null ? secondsAgo(g.eatableTick) : Number.MAX_SAFE_INTEGER;
@@ -423,15 +420,13 @@ export default function ClassicPacman({
 
     let colour: string;
     if (g.eatableTick !== null) {
-      if (eatable > 5) colour = getTick() % 20 > 10 ? "#FFFFFF" : "#0000BB";
-      else colour = "#0000BB";
+      colour = eatable > 5 ? (getTick() % 20 > 10 ? "#FFFFFF" : "#0000BB") : "#0000BB";
     } else if (g.eatenTick !== null) {
       colour = "#222";
     } else {
       colour = g.colour;
     }
 
-    // clear expired states
     if (g.eatableTick !== null && eatable > 8) g.eatableTick = null;
     if (g.eatenTick !== null && eatenAgo > 3) g.eatenTick = null;
 
@@ -447,7 +442,6 @@ export default function ClassicPacman({
     ctx.quadraticCurveTo(left, top, left + s / 2, top);
     ctx.quadraticCurveTo(left + s, top, left + s, base);
 
-    // wavy bottom
     ctx.quadraticCurveTo(tl - inc * 1, base + high, tl - inc * 2, base);
     ctx.quadraticCurveTo(tl - inc * 3, base + low, tl - inc * 4, base);
     ctx.quadraticCurveTo(tl - inc * 5, base + high, tl - inc * 6, base);
@@ -456,7 +450,6 @@ export default function ClassicPacman({
     ctx.closePath();
     ctx.fill();
 
-    // eyes
     ctx.beginPath();
     ctx.fillStyle = "#FFF";
     ctx.arc(left + 6, top + 6, s / 6, 0, 300, false);
@@ -480,9 +473,10 @@ export default function ClassicPacman({
     ctx.arc(left + s - 6 + o[0], top + 6 + o[1], s / 15, 0, 300, false);
     ctx.closePath();
     ctx.fill();
-  };
+    return null as unknown as GhostT;
+  }
 
-  /** == Movement (ported) == */
+  /** Movement */
   const userNewCoord = (dir: number, cur: Vec): Vec => ({
     x: cur.x + ((dir === LEFT && -2) || (dir === RIGHT && 2) || 0),
     y: cur.y + ((dir === DOWN && 2) || (dir === UP && -2) || 0),
@@ -514,12 +508,11 @@ export default function ClassicPacman({
     return false;
   };
 
-  /** == Gameplay handlers == */
+  /** Gameplay handlers */
   const eatenPill = () => {
     audio.play("eatpill");
     timerStartRef.current = getTick();
     eatenCountRef.current = 0;
-    // semua ghost jadi eatable
     ghostsRef.current = ghostsRef.current.map((g) => ({
       ...g,
       dir: ghostOpposite(g.dir),
@@ -534,12 +527,11 @@ export default function ClassicPacman({
     userPosRef.current = { x: 90, y: 120 };
     userDirRef.current = LEFT;
     userDueRef.current = LEFT;
-    startLevel(); // langsung next
+    startLevel();
   };
 
   const startLevel = () => {
-    // reset ghosts
-    ghostsRef.current = ghostColours.map<Ghost>((c) => ({
+    ghostsRef.current = ghostColours.map((c) => ({
       pos: { x: 90, y: 80 },
       dir: Math.random() < 0.5 ? UP : DOWN,
       due: Math.random() < 0.5 ? LEFT : RIGHT,
@@ -562,7 +554,6 @@ export default function ClassicPacman({
     userPosRef.current = { x: 90, y: 120 };
     userDirRef.current = LEFT;
     userDueRef.current = LEFT;
-    // draw map & countdown
     startLevel();
   };
 
@@ -572,18 +563,15 @@ export default function ClassicPacman({
       const left = v - 1;
       if (left > 0) startLevel();
       else {
-        // GAME OVER
-        // gambar terakhir + dialog
         drawAll(ctx, true);
         dialog(ctx, "GAME OVER");
-        // submit skor satu kali
         if (typeof onScoreSubmit === "function") onScoreSubmit(score);
       }
       return left;
     });
   };
 
-  /** == Core draw == */
+  /** Core draw */
   const drawMap = (ctx: CanvasRenderingContext2D) => {
     const s = blockSizeRef.current;
     const h = mapRef.current.length;
@@ -597,45 +585,29 @@ export default function ClassicPacman({
   const drawAll = (ctx: CanvasRenderingContext2D, skipEntities = false) => {
     drawPills(ctx);
     if (!skipEntities) {
-      // ghosts
       ghostsRef.current.forEach((g) => drawGhost(ctx, g));
-      // user
       drawUser(ctx);
     }
     drawFooter(ctx);
   };
 
-  /** == Game loop steps == */
+  /** Main loop */
   const collided = (u: Vec, g: Vec) => Math.hypot(g.x - u.x, g.y - u.y) < 10;
 
   const mainDraw = (ctx: CanvasRenderingContext2D) => {
-    // gerak ghosts
+    // ghosts
     const ghostPosOld = ghostsRef.current.map((g) => ({ ...g.pos }));
     ghostsRef.current = ghostsRef.current.map((g) => {
-      // change due randomly on grid
       const onGridSq = onGrid(g.pos);
       let due = g.due;
       if (onGridSq) {
-        // pilih sumbu tegak/lintang
-        due = (g.dir === LEFT || g.dir === RIGHT) ? (Math.random() < 0.5 ? UP : DOWN) : (Math.random() < 0.5 ? LEFT : RIGHT);
+        due = g.dir === LEFT || g.dir === RIGHT ? (Math.random() < 0.5 ? UP : DOWN) : (Math.random() < 0.5 ? LEFT : RIGHT);
       }
-      // move try
       let npos = ghostNewCoord(due, g.pos, g);
-      // wall check
-      if (
-        onGridSq &&
-        isWall({ y: pointToCoord(nextSquare(npos.y, due)), x: pointToCoord(nextSquare(npos.x, due)) })
-      ) {
-        // fallback: arah lama
+      if (onGridSq && isWall({ y: pointToCoord(nextSquare(npos.y, due)), x: pointToCoord(nextSquare(npos.x, due)) })) {
         npos = ghostNewCoord(g.dir, g.pos, g);
-        if (
-          onGridSq &&
-          isWall({ y: pointToCoord(nextSquare(npos.y, g.dir)), x: pointToCoord(nextSquare(npos.x, g.dir)) })
-        ) {
-          // mentok: tetap
+        if (onGridSq && isWall({ y: pointToCoord(nextSquare(npos.y, g.dir)), x: pointToCoord(nextSquare(npos.x, g.dir)) })) {
           npos = g.pos;
-        } else {
-          g.dir = g.dir;
         }
       } else {
         g.dir = due;
@@ -645,12 +617,11 @@ export default function ClassicPacman({
       return { ...g, pos: npos, due };
     });
 
-    // gerak user
+    // user
     const oldUser = { ...userPosRef.current };
-    // handle belok
     let npos = userNewCoord(userDueRef.current, userPosRef.current);
     if (
-      (userDueRef.current === userDirRef.current && (isOnSamePlane(userDueRef.current, userDirRef.current))) ||
+      (userDueRef.current === userDirRef.current && isOnSamePlane(userDueRef.current, userDirRef.current)) ||
       (onGrid(userPosRef.current) && isFloor(next(npos, userDueRef.current)))
     ) {
       userDirRef.current = userDueRef.current;
@@ -661,17 +632,14 @@ export default function ClassicPacman({
       userDirRef.current = NONE;
     }
     if (userDirRef.current !== NONE) {
-      // warp
       if (npos.y === 100 && npos.x >= 190 && userDirRef.current === RIGHT) npos = { y: 100, x: -10 };
       if (npos.y === 100 && npos.x <= -12 && userDirRef.current === LEFT) npos = { y: 100, x: 190 };
       userPosRef.current = npos;
     }
 
-    // redraw dirty
     ghostsRef.current.forEach((_, i) => redrawBlock(ghostPosOld[i], ctx));
     redrawBlock(oldUser, ctx);
 
-    // makan biscuit/pill
     const ns = next(userPosRef.current, userDirRef.current);
     const block = mapRef.current[ns.y]?.[ns.x];
     const isMid = (v: number) => {
@@ -688,24 +656,20 @@ export default function ClassicPacman({
       });
       eatenCountRef.current += 1;
       if (eatenCountRef.current === 182) {
-        // sesuai kode lama
         completedLevel();
       }
       if (block === PILL) eatenPill();
     }
 
-    // gambar entities
     ghostsRef.current.forEach((g) => drawGhost(ctx, g));
     drawUser(ctx);
 
-    // collision
     for (const g of ghostsRef.current) {
       if (collided(userPosRef.current, g.pos)) {
         if (g.eatableTick !== null) {
           audio.play("eatghost");
           g.eatableTick = null;
           g.eatenTick = getTick();
-          // combo 200/400/800/1600
           const idx = Math.min(eatenCountRef.current, 4);
           const combo = [200, 400, 800, 1600][Math.max(0, idx - 1)];
           setScore((s) => s + combo);
@@ -736,7 +700,7 @@ export default function ClassicPacman({
     } else if (state === WAITING && stateChangedRef.current) {
       stateChangedRef.current = false;
       drawMap(ctx);
-      dialog(ctx, "Press N to start a New game");
+      dialog(ctx, "Press N/Space to start");
     } else if (state === EATEN_PAUSE && getTick() - timerStartRef.current > FPS / 3) {
       drawMap(ctx);
       setState(PLAYING);
@@ -744,7 +708,6 @@ export default function ClassicPacman({
       if (getTick() - timerStartRef.current > FPS * 2) {
         loseLife(ctx);
       } else {
-        // draw death anim
         redrawBlock(userPosRef.current, ctx);
         ghostsRef.current.forEach((g) => redrawBlock(g.pos, ctx));
         drawUserDead(ctx, (getTick() - timerStartRef.current) / (FPS * 2));
@@ -765,18 +728,18 @@ export default function ClassicPacman({
     drawFooter(ctx);
   };
 
-  /** == Effects == */
+  /** Effects */
+  const handleStart = () => startNewGame();
+
   // responsive canvas
   useEffect(() => {
     const parent = canvasRef.current?.parentElement;
     const resize = () => {
       if (!canvasRef.current || !parent) return;
-      // blockSize berdasar lebar container / 19
       const block = Math.floor(parent.clientWidth / 19);
-      blockSizeRef.current = Math.max(14, Math.min(block, 28)); // clamp
+      blockSizeRef.current = Math.max(14, Math.min(block, 28));
       canvasRef.current.width = blockSizeRef.current * 19;
       canvasRef.current.height = blockSizeRef.current * 22 + 30;
-      // redraw map once
       const ctx = canvasRef.current.getContext("2d");
       if (ctx) {
         drawMap(ctx);
@@ -807,21 +770,27 @@ export default function ClassicPacman({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, level, score, lives, loaded]);
 
-  // keyboard
+  // keyboard (Space/N start)
   useEffect(() => {
     const keyDown = (e: KeyboardEvent) => {
       if (e.keyCode === KEY.N) {
         startNewGame();
+      } else if (e.keyCode === 32) { // SPACE
+        if (state === WAITING) {
+          startNewGame();
+          e.preventDefault();
+          e.stopPropagation();
+          return false as unknown as boolean;
+        }
       } else if (e.keyCode === KEY.S) {
         audio.disable();
-        // toggle flag
         const flag = localStorage.getItem("soundDisabled") === "true";
         localStorage.setItem("soundDisabled", (!flag).toString());
       } else if (e.keyCode === KEY.P && state === PAUSE) {
         audio.resume();
         const ctx = canvasRef.current?.getContext("2d");
         if (ctx) drawMap(ctx);
-        setState(WAITING); // kembali ke state tersimpan (sederhana)
+        setState(WAITING);
       } else if (e.keyCode === KEY.P) {
         setState(PAUSE);
         audio.pause();
@@ -866,35 +835,38 @@ export default function ClassicPacman({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
-  // swipe mobile
+  // swipe mobile - prevent page scroll
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    let sx = 0,
-      sy = 0,
-      active = false;
+    let sx = 0, sy = 0, active = false;
     const TH = 20;
     const dirFrom = (dx: number, dy: number) =>
       Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? RIGHT : LEFT) : dy > 0 ? DOWN : UP;
+
     const onStart = (e: TouchEvent) => {
       active = true;
       sx = e.touches[0].clientX;
       sy = e.touches[0].clientY;
+      e.preventDefault();
     };
     const onMove = (e: TouchEvent) => {
       if (!active) return;
       const dx = e.touches[0].clientX - sx;
       const dy = e.touches[0].clientY - sy;
-      if (Math.abs(dx) < TH && Math.abs(dy) < TH) return;
+      if (Math.abs(dx) < TH && Math.abs(dy) < TH) { e.preventDefault(); return; }
       userDueRef.current = dirFrom(dx, dy);
       active = false;
+      e.preventDefault();
     };
-    const onEnd = () => {
+    const onEnd = (e: TouchEvent) => {
       active = false;
+      e.preventDefault();
     };
-    el.addEventListener("touchstart", onStart, { passive: true });
-    el.addEventListener("touchmove", onMove, { passive: true });
-    el.addEventListener("touchend", onEnd, { passive: true });
+
+    el.addEventListener("touchstart", onStart, { passive: false });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd, { passive: false });
     return () => {
       el.removeEventListener("touchstart", onStart);
       el.removeEventListener("touchmove", onMove);
@@ -902,14 +874,11 @@ export default function ClassicPacman({
     };
   }, []);
 
-  // “score bridge” ke parent (untuk auto submit & UI luar)
+  // kirim score ke parent (opsional)
   useEffect(() => {
-    // kirim skor ke parent setiap berubah
     try {
       window.parent?.postMessage({ __monadGame: true, type: "score", payload: { score }, sessionId: "react" }, "*");
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [score]);
 
   return (
@@ -932,12 +901,29 @@ export default function ClassicPacman({
         ) : null}
       </div>
 
-      <div className="w-full rounded-2xl border border-neutral-800 bg-black shadow-inner p-2">
-        <canvas ref={canvasRef} className="w-full h-auto block rounded-md select-none touch-pan-y" />
+      <div className="relative w-full rounded-2xl border border-neutral-800 bg-black shadow-inner p-2 overflow-hidden">
+        {state === WAITING && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60">
+            {isMobile ? (
+              <button
+                onClick={handleStart}
+                className="px-5 py-3 rounded-2xl bg-yellow-400 text-black font-medium hover:bg-yellow-300 active:scale-[0.99]"
+              >
+                Start
+              </button>
+            ) : (
+              <div className="px-4 py-2 rounded-2xl bg-neutral-900/80 border border-neutral-700 text-neutral-200">
+                Press <span className="font-semibold">Space</span> to Start
+              </div>
+            )}
+          </div>
+        )}
+
+        <canvas ref={canvasRef} className="w-full h-auto block rounded-md select-none touch-none" />
       </div>
 
       <div className="text-xs text-neutral-400">
-        <p>Controls: Arrow / WASD • Mobile: swipe • N = New Game • P = Pause • S = Toggle Sound</p>
+        <p>Controls: Arrow / WASD • Mobile: swipe • Space/N = Start • P = Pause • S = Toggle Sound</p>
       </div>
     </div>
   );
