@@ -13,7 +13,9 @@ const NONE = 4,
   PLAYING = 7,
   COUNTDOWN = 8,
   EATEN_PAUSE = 9,
-  DYING = 10;
+  DYING = 10,
+  LEVEL_CLEAR = 12,
+  GAME_OVER = 13;
 
 type Vec = { x: number; y: number };
 
@@ -25,10 +27,11 @@ const KEY = {
   N: 78,
   P: 80,
   S: 83,
+  SPACE: 32,
 } as const;
 
-const FPS = 30;
-const STEP_MS = 1000 / FPS;
+const BASE_FPS = 30; // logic step
+const STEP_MS = 1000 / BASE_FPS;
 
 const WALL = 0;
 const BISCUIT = 1;
@@ -173,6 +176,7 @@ export default function ClassicPacman({
   onScoreSubmit?: (finalScore: number) => void;
   rootAssetBase?: string;
 }) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [state, setState] = useState<number>(WAITING);
@@ -201,6 +205,7 @@ export default function ClassicPacman({
   const mapRef = useRef(clone2D(MAP_DATA));
   const blockSizeRef = useRef(18);
   const pillPulseRef = useRef(0);
+  const dprRef = useRef(1);
 
   // entities
   const userPosRef = useRef<Vec>({ x: 90, y: 120 });
@@ -208,7 +213,7 @@ export default function ClassicPacman({
   const userDueRef = useRef<number>(LEFT);
   type Ghost = { pos: Vec; dir: number; due: number; eatableTick: number | null; eatenTick: number | null; colour: string };
   const ghostsRef = useRef<Ghost[]>([]);
-  const ghostColours = ["#00FFDE", "#FF0000", "#FFB8DE", "#FFB847"];
+  const ghostColours = ["#FF0000", "#FFB8DE", "#00FFDE", "#FFB847"]; // Blinky, Pinky, Inky, Clyde
 
   // audio
   const audio = useAudio(rootAssetBase);
@@ -242,9 +247,12 @@ export default function ClassicPacman({
   /** --------------- drawing (full redraw each frame) --------------- */
   const drawWalls = (ctx: CanvasRenderingContext2D) => {
     const s = blockSizeRef.current;
-    ctx.strokeStyle = "#00F";
-    ctx.lineWidth = 5;
+    // glow base
+    ctx.save();
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#0019ff";
+    ctx.lineWidth = 6;
     for (const line of WALLS) {
       ctx.beginPath();
       for (const seg of line) {
@@ -254,7 +262,21 @@ export default function ClassicPacman({
       }
       ctx.stroke();
     }
+    // bright edge
+    ctx.strokeStyle = "#2b6dff";
+    ctx.lineWidth = 3;
+    for (const line of WALLS) {
+      ctx.beginPath();
+      for (const seg of line) {
+        if ("move" in seg) ctx.moveTo(seg.move[0] * s, seg.move[1] * s);
+        else if ("line" in seg) ctx.lineTo(seg.line[0] * s, seg.line[1] * s);
+        else ctx.quadraticCurveTo(seg.curve[0] * s, seg.curve[1] * s, seg.curve[2] * s, seg.curve[3] * s);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
   };
+
   const drawMap = (ctx: CanvasRenderingContext2D) => {
     const s = blockSizeRef.current;
     const h = mapRef.current.length;
@@ -266,17 +288,20 @@ export default function ClassicPacman({
       for (let j = 0; j < w; j++) {
         const layout = mapRef.current[i][j];
         if (layout === PILL) continue; // pill digambar terpisah (pulse)
-        ctx.beginPath();
-        ctx.fillStyle = "#000";
-        ctx.fillRect(j * s, i * s, s, s);
-        if (layout === BISCUIT) {
-          ctx.fillStyle = "#FFF";
-          ctx.fillRect(j * s + s / 2.5, i * s + s / 2.5, s / 6, s / 6);
+        if (layout === BISCUIT || layout === EMPTY || layout === BLOCK) {
+          ctx.beginPath();
+          ctx.fillStyle = "#000";
+          ctx.fillRect(j * s, i * s, s, s);
+          if (layout === BISCUIT) {
+            ctx.fillStyle = "#FFF";
+            ctx.fillRect(j * s + s / 2.5, i * s + s / 2.5, s / 6, s / 6);
+          }
+          ctx.closePath();
         }
-        ctx.closePath();
       }
     }
   };
+
   const drawPills = (ctx: CanvasRenderingContext2D) => {
     const s = blockSizeRef.current;
     pillPulseRef.current = (pillPulseRef.current + 1) % 31;
@@ -292,6 +317,7 @@ export default function ClassicPacman({
       }
     }
   };
+
   const drawFooter = (ctx: CanvasRenderingContext2D) => {
     const top = mapRef.current.length * blockSizeRef.current;
     const base = top + 17;
@@ -321,6 +347,7 @@ export default function ClassicPacman({
     ctx.fillText(`Score: ${score}`, 30, base);
     ctx.fillText(`Level: ${level}`, 260, base);
   };
+
   const dialog = (ctx: CanvasRenderingContext2D, text: string) => {
     ctx.fillStyle = "#FF0";
     ctx.font = "18px Calibri, Arial, sans-serif";
@@ -328,6 +355,7 @@ export default function ClassicPacman({
     const x = (mapRef.current[0].length * blockSizeRef.current - width) / 2;
     ctx.fillText(text, x, mapRef.current.length * 10 + 8);
   };
+
   const drawUser = (ctx: CanvasRenderingContext2D) => {
     const s = blockSizeRef.current;
     const calcAngle = (dir: number, pos: Vec) => {
@@ -344,6 +372,7 @@ export default function ClassicPacman({
     ctx.arc((userPosRef.current.x / 10) * s + s / 2, (userPosRef.current.y / 10) * s + s / 2, s / 2, Math.PI * angle.start, Math.PI * angle.end, angle.rev);
     ctx.fill();
   };
+
   const drawUserDead = (ctx: CanvasRenderingContext2D, amount: number) => {
     const s = blockSizeRef.current;
     if (amount >= 1) return;
@@ -356,12 +385,13 @@ export default function ClassicPacman({
     ctx.arc(cx, cy, half, 0, Math.PI * 2 * amount, true);
     ctx.fill();
   };
+
   const drawGhost = (ctx: CanvasRenderingContext2D, g: Ghost) => {
     const s = blockSizeRef.current;
     const top = (g.pos.y / 10) * s;
     const left = (g.pos.x / 10) * s;
 
-    const secondsAgo = (t: number | null) => (t === null ? 9999 : (getTick() - t) / FPS);
+    const secondsAgo = (t: number | null) => (t === null ? 9999 : (getTick() - t) / BASE_FPS);
     let colour: string;
     if (g.eatableTick !== null) colour = secondsAgo(g.eatableTick) > 5 ? (getTick() % 20 > 10 ? "#FFF" : "#00B") : "#00B";
     else if (g.eatenTick !== null) colour = "#222";
@@ -412,6 +442,7 @@ export default function ClassicPacman({
     x: cur.x + ((dir === LEFT && -2) || (dir === RIGHT && 2) || 0),
     y: cur.y + ((dir === DOWN && 2) || (dir === UP && -2) || 0),
   });
+
   const ghostAddBounded = (x1: number, x2: number) => {
     const rem = x1 % 10;
     const result = rem + x2;
@@ -419,14 +450,23 @@ export default function ClassicPacman({
     if (rem > 0 && result < 0) return x1 - rem;
     return x1 + x2;
   };
+
+  const ghostSpeedForLevel = (g: Ghost) => {
+    const base = g.eatableTick !== null ? 1 : g.eatenTick !== null ? 4 : 2;
+    // tambah 0.15 per level (maks 4)
+    return Math.min(4, base + (level - 1) * 0.15);
+  };
+
   const ghostNewCoord = (dir: number, cur: Vec, g: Ghost): Vec => {
-    const speed = g.eatableTick !== null ? 1 : g.eatenTick !== null ? 4 : 2;
+    const speed = ghostSpeedForLevel(g);
     const xSpeed = dir === LEFT ? -speed : dir === RIGHT ? speed : 0;
     const ySpeed = dir === DOWN ? speed : dir === UP ? -speed : 0;
     return { x: ghostAddBounded(cur.x, xSpeed), y: ghostAddBounded(cur.y, ySpeed) };
   };
+
   const ghostOpposite = (dir: number) =>
     (dir === LEFT && RIGHT) || (dir === RIGHT && LEFT) || (dir === UP && DOWN) || UP;
+
   const isOnSamePlane = (a: number, b: number) =>
     ((a === LEFT || a === RIGHT) && (b === LEFT || b === RIGHT)) ||
     ((a === UP || a === DOWN) && (b === UP || b === DOWN));
@@ -438,8 +478,13 @@ export default function ClassicPacman({
     eatenCountRef.current = 0;
     ghostsRef.current = ghostsRef.current.map((g) => ({ ...g, dir: ghostOpposite(g.dir), eatableTick: getTick() }));
   };
+
   const completedLevel = () => {
-    setState(WAITING);
+    setState(LEVEL_CLEAR); // tampilkan overlay "Level X Cleared"
+    timerStartRef.current = getTick();
+  };
+
+  const goNextLevel = () => {
     setLevel((lv) => lv + 1);
     mapRef.current = clone2D(MAP_DATA);
     userPosRef.current = { x: 90, y: 120 };
@@ -447,6 +492,7 @@ export default function ClassicPacman({
     userDueRef.current = LEFT;
     startLevel();
   };
+
   const startLevel = () => {
     ghostsRef.current = ghostColours.map((c) => ({
       pos: { x: 90, y: 80 },
@@ -460,8 +506,8 @@ export default function ClassicPacman({
     timerStartRef.current = getTick();
     setState(COUNTDOWN);
   };
+
   const startNewGame = () => {
-    setState(WAITING);
     setLevel(1);
     setLives(3);
     setScore(0);
@@ -471,16 +517,16 @@ export default function ClassicPacman({
     userDueRef.current = LEFT;
     startLevel();
   };
+
   const loseLife = (ctx: CanvasRenderingContext2D) => {
     setState(WAITING);
     setLives((v) => {
       const left = v - 1;
       if (left > 0) startLevel();
       else {
+        setState(GAME_OVER);
         drawMap(ctx);
         drawFooter(ctx);
-        dialog(ctx, "GAME OVER");
-        onScoreSubmit?.(score);
       }
       return left;
     });
@@ -488,7 +534,7 @@ export default function ClassicPacman({
 
   /** --------------- one fixed step --------------- */
   const fixedStep = (ctx: CanvasRenderingContext2D) => {
-    // draw map fresh every frame -> tidak ada artefak
+    // draw map fresh every frame
     drawMap(ctx);
     drawPills(ctx);
 
@@ -497,13 +543,11 @@ export default function ClassicPacman({
       ghostsRef.current = ghostsRef.current.map((g) => {
         const onGridSq = onGrid(g.pos);
         let tryDue = g.due;
-        // pilih belokan acak saat pas di grid (mirip aslinya)
         if (onGridSq) {
           tryDue = g.dir === LEFT || g.dir === RIGHT ? (Math.random() < 0.5 ? UP : DOWN) : (Math.random() < 0.5 ? LEFT : RIGHT);
         }
         let npos: Vec | null = null;
 
-        // boleh ganti arah jika kotak depannya floor
         const n1 = ghostNewCoord(tryDue, g.pos, g);
         if (
           onGridSq &&
@@ -589,25 +633,32 @@ export default function ClassicPacman({
         }
       }
     } else if (state === WAITING) {
-      dialog(ctx, "Press N/Space to start");
-    } else if (state === EATEN_PAUSE && getTick() - timerStartRef.current > FPS / 3) {
+      dialog(ctx, "Press Space/N to start");
+    } else if (state === EATEN_PAUSE && getTick() - timerStartRef.current > BASE_FPS / 3) {
       setState(PLAYING);
     } else if (state === DYING) {
-      if (getTick() - timerStartRef.current > FPS * 2) {
+      if (getTick() - timerStartRef.current > BASE_FPS * 2) {
         loseLife(ctx);
       } else {
-        drawUserDead(ctx, (getTick() - timerStartRef.current) / (FPS * 2));
+        drawUserDead(ctx, (getTick() - timerStartRef.current) / (BASE_FPS * 2));
       }
     } else if (state === COUNTDOWN) {
-      const diff = 5 + Math.floor((timerStartRef.current - getTick()) / FPS);
+      const diff = 5 + Math.floor((timerStartRef.current - getTick()) / BASE_FPS);
       if (diff === 0) setState(PLAYING);
       else if (diff !== lastCountdownRef.current) {
         lastCountdownRef.current = diff;
         dialog(ctx, `Starting in: ${diff}`);
       }
+    } else if (state === LEVEL_CLEAR) {
+      dialog(ctx, `Level ${level} cleared!`);
+      if (getTick() - timerStartRef.current > BASE_FPS * 2) {
+        goNextLevel();
+      }
+    } else if (state === GAME_OVER) {
+      dialog(ctx, `GAME OVER — Score: ${score}`);
     }
 
-    // draw actors + footer terakhir agar tampak di atas
+    // draw actors + footer terakhir
     ghostsRef.current.forEach((g) => drawGhost(ctx, g));
     drawUser(ctx);
     drawFooter(ctx);
@@ -635,23 +686,33 @@ export default function ClassicPacman({
   };
 
   /** --------------- effects --------------- */
-  // responsive size
+  // responsive size + HiDPI
   useEffect(() => {
-    const parent = canvasRef.current?.parentElement;
     const resize = () => {
-      if (!canvasRef.current || !parent) return;
+      if (!canvasRef.current || !wrapRef.current) return;
+      const parent = wrapRef.current;
       const block = Math.floor(parent.clientWidth / 19);
       blockSizeRef.current = Math.max(14, Math.min(block, 28));
       const w = blockSizeRef.current * 19;
       const h = blockSizeRef.current * 22 + 30;
-      canvasRef.current.width = w;
-      canvasRef.current.height = h;
+
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      dprRef.current = dpr;
+
+      canvasRef.current.style.width = `${w}px`;
+      canvasRef.current.style.height = `${h}px`;
+      canvasRef.current.width = Math.floor(w * dpr);
+      canvasRef.current.height = Math.floor(h * dpr);
+
       const ctx = canvasRef.current.getContext("2d");
-      if (ctx) { drawMap(ctx); drawFooter(ctx); }
+      if (ctx) {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // HiDPI fix
+        drawMap(ctx); drawFooter(ctx);
+      }
     };
     resize();
     const ro = new ResizeObserver(resize);
-    if (parent) ro.observe(parent);
+    if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
 
@@ -670,22 +731,21 @@ export default function ClassicPacman({
     accRef.current = 0;
     rafRef.current = requestAnimationFrame(frame);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/executable-deps
   }, [ready, state, level, score, lives]);
 
   // keyboard
   useEffect(() => {
     const keyDown = (e: KeyboardEvent) => {
-      if (e.keyCode === KEY.N || (e.key === " " && state === WAITING)) {
+      if (e.keyCode === KEY.N || (e.keyCode === KEY.SPACE && (state === WAITING || state === GAME_OVER))) {
         startNewGame(); e.preventDefault(); e.stopPropagation(); return false as unknown as boolean;
       } else if (e.keyCode === KEY.S) {
         const flag = localStorage.getItem("soundDisabled") === "true";
         localStorage.setItem("soundDisabled", (!flag).toString());
-      } else if (e.keyCode === KEY.P && state === PAUSE) {
-        audio.resume(); setState(WAITING);
       } else if (e.keyCode === KEY.P) {
-        setState(PAUSE); audio.pause();
-      } else if (state !== PAUSE) {
+        if (state === PAUSE) { setState(PLAYING); audio.resume(); }
+        else if (state === PLAYING) { setState(PAUSE); audio.pause(); }
+      } else if (state === PLAYING) {
         const km: Record<number, number> = {
           [KEY.ARROW_LEFT]: LEFT, [KEY.ARROW_UP]: UP, [KEY.ARROW_RIGHT]: RIGHT, [KEY.ARROW_DOWN]: DOWN,
           65: LEFT, 87: UP, 68: RIGHT, 83: DOWN,
@@ -710,7 +770,7 @@ export default function ClassicPacman({
     const dirFrom = (dx: number, dy: number) =>
       Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? RIGHT : LEFT) : dy > 0 ? DOWN : UP;
 
-    const onStart = (e: TouchEvent) => { active = true; sx = e.touches[0].clientX; sy = e.touches[0].clientY; e.preventDefault(); };
+    const onStart = (e: TouchEvent) => { if (state !== PLAYING) return; active = true; sx = e.touches[0].clientX; sy = e.touches[0].clientY; e.preventDefault(); };
     const onMove = (e: TouchEvent) => {
       if (!active) return;
       const dx = e.touches[0].clientX - sx;
@@ -730,11 +790,15 @@ export default function ClassicPacman({
       el.removeEventListener("touchmove", onMove);
       el.removeEventListener("touchend", onEnd);
     };
-  }, []);
+  }, [state]);
 
-  // minimal HUD + username button (tetap seperti sebelumnya)
+  /** ---------- UI ---------- */
+  const showStartOverlay = state === WAITING;
+  const showGameOver = state === GAME_OVER;
+
   return (
     <div className="space-y-3">
+      {/* HUD atas */}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <div className="px-2 py-1 rounded bg-neutral-900/70 border border-neutral-800">Score: <b>{score}</b></div>
         <div className="px-2 py-1 rounded bg-neutral-900/70 border border-neutral-800">Level: <b>{level}</b></div>
@@ -752,9 +816,19 @@ export default function ClassicPacman({
         ) : null}
       </div>
 
-      <div className="relative rounded-2xl border border-neutral-800 bg-black shadow-inner p-2 select-none touch-none">
-        {/* Start overlay (mobile button / desktop space hint) */}
-        {state === WAITING && (
+      <div ref={wrapRef} className="relative rounded-2xl border border-neutral-800 bg-black shadow-inner p-2 select-none touch-none">
+        {/* Pause button */}
+        {state === PLAYING || state === PAUSE ? (
+          <button
+            onClick={() => setState((s) => (s === PAUSE ? PLAYING : PAUSE))}
+            className="absolute right-3 top-3 z-20 px-3 py-1 rounded bg-neutral-900/80 border border-neutral-700 text-neutral-200"
+          >
+            {state === PAUSE ? "Resume" : "Pause"}
+          </button>
+        ) : null}
+
+        {/* Start overlay */}
+        {showStartOverlay && (
           <div className="absolute inset-2 z-10 flex items-center justify-center bg-black/60 rounded">
             {isMobile ? (
               <button
@@ -771,11 +845,25 @@ export default function ClassicPacman({
           </div>
         )}
 
-        <canvas ref={canvasRef} className="w-full h-auto block rounded-md" />
+        {/* Game Over overlay */}
+        {showGameOver && (
+          <div className="absolute inset-2 z-10 flex flex-col items-center justify-center gap-3 bg-black/70 rounded text-center">
+            <div className="text-yellow-300 text-xl font-semibold">GAME OVER</div>
+            <div className="text-yellow-200">Score: <b>{score}</b></div>
+            <button
+              onClick={startNewGame}
+              className="px-5 py-2 rounded-2xl bg-yellow-400 text-black font-medium hover:bg-yellow-300 active:scale-[0.99]"
+            >
+              Play Again
+            </button>
+          </div>
+        )}
+
+        <canvas ref={canvasRef} className="block rounded-md" />
       </div>
 
       <div className="text-xs text-neutral-400">
-        Controls: Arrow / WASD • Mobile: swipe • Space/N = Start • P = Pause • S = Toggle Sound
+        Controls: Arrow / WASD • Mobile: swipe • Space/N = Start • P/Btn = Pause • S = Toggle Sound
       </div>
     </div>
   );
