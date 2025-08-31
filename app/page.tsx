@@ -1,60 +1,69 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import ClassicPacman from "@/components/pacman/ClassicPacman";
-import GamesIdBar from "@/components/GamesIdBar";
-import { fetchUsernameForWallet } from "@/lib/gamesId";
+import HeaderBar from "@/components/ui/HeaderBar";
+import { usePrivy } from "@privy-io/react-auth";
+import { useEffect, useMemo, useState } from "react";
+import { getUsernameForWallet } from "@/lib/username";
 
-export default function GamePage() {
-  const [wallet, setWallet] = useState<string | null>(null);
+export default function HomePage() {
+  const { user, authenticated, ready, login, logout } = usePrivy();
   const [username, setUsername] = useState<string | null>(null);
-  const [userErr, setUserErr] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  // Ambil username saat wallet tersedia
+  const wallet = useMemo(() => {
+    // ambil wallet Cross App (Monad Games ID)
+    if (!authenticated || !user) return null;
+    const cross = user.linkedAccounts.find(
+      (a) => a.type === "cross_app" && "providerApp" in a && a.providerApp?.id === "cmd8euall0037le0my79qpz42"
+    ) as any;
+    const w = cross?.embeddedWallets?.[0]?.address as string | undefined;
+    return w ?? null;
+  }, [authenticated, user]);
+
   useEffect(() => {
-    let cancel = false;
+    let canceled = false;
     (async () => {
-      setUserErr(null);
-      if (!wallet) { setUsername(null); return; }
-      try {
-        const res = await fetchUsernameForWallet(wallet);
-        if (cancel) return;
-        setUsername(res.hasUsername && res.user?.username ? res.user.username : null);
-      } catch {
-        if (!cancel) {
-          setUsername(null);
-          setUserErr("Failed to check username");
-        }
+      if (wallet) {
+        const uname = await getUsernameForWallet(wallet);
+        if (!canceled) setUsername(uname);
+      } else {
+        setUsername(null);
       }
     })();
-    return () => { cancel = true; };
+    return () => { canceled = true; };
   }, [wallet]);
 
-  const handleSubmitScore = (finalScore: number) => {
-    if (!wallet || finalScore <= 0 || submitting) return;
-    setSubmitting(true);
-    fetch("/api/submit-score", {
+  async function submitDeltaScore(delta: number, playedMs?: number) {
+    if (!wallet || delta <= 0) return;
+    await fetch("/api/submit-score", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ player: wallet, scoreDelta: finalScore, txDelta: 0 }),
-    })
-      .catch(() => {})
-      .finally(() => setSubmitting(false));
-  };
+      body: JSON.stringify({
+        wallet,
+        deltaScore: delta,
+        deltaTx: 0,
+        level: 1,         // bisa kamu isi level berjalan bila mau
+        playedMs: playedMs ?? 0,
+      }),
+    }).catch(() => {});
+  }
 
   return (
-    <main className="max-w-5xl mx-auto p-4 space-y-4">
-      <GamesIdBar onWallet={setWallet} onUsername={setUsername} />
-      {userErr && <p className="text-xs text-red-400">{userErr}</p>}
-
-      <ClassicPacman
-        wallet={wallet}
+    <main className="min-h-screen bg-black text-neutral-200">
+      <HeaderBar
+        authenticated={authenticated}
         username={username}
-        onScoreSubmit={handleSubmitScore}
+        onLogin={login}
+        onLogout={logout}
       />
-
-      {submitting && <p className="text-xs text-neutral-400">Submitting score…</p>}
+      <div className="mx-auto max-w-[820px] px-4 py-6">
+        <ClassicPacman
+          wallet={wallet}
+          username={username}
+          // panggil dengan delta score (skor sesi)
+          onScoreSubmit={(deltaScore) => submitDeltaScore(deltaScore)}
+        />
+      </div>
     </main>
   );
 }
