@@ -2,797 +2,520 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-/** ==== Constants & Types ==== */
-const NONE = 4,
-  UP = 3,
-  LEFT = 2,
-  DOWN = 1,
-  RIGHT = 11,
-  WAITING = 5,
-  PAUSE = 6,
-  PLAYING = 7,
-  COUNTDOWN = 8,
-  EATEN_PAUSE = 9,
-  DYING = 10;
+/** =================== CONSTANTS =================== */
+const NONE=4,UP=3,LEFT=2,DOWN=1,RIGHT=11,WAITING=5,PAUSE=6,PLAYING=7,COUNTDOWN=8,EATEN_PAUSE=9,DYING=10;
+const FPS=30, STEP_MS=1000/FPS;
 
-type Vec = { x: number; y: number };
+type Vec={x:number;y:number};
+type OnScoreSubmit=(score:number)=>void;
 
-type AudioFileMap = {
-  [name: string]: HTMLAudioElement;
-};
+/** Tiles */
+const WALL=0,BISCUIT=1,EMPTY=2,BLOCK=3,PILL=4;
 
-const KEY = {
-  ARROW_LEFT: 37,
-  ARROW_UP: 38,
-  ARROW_RIGHT: 39,
-  ARROW_DOWN: 40,
-  N: 78,
-  P: 80,
-  S: 83,
-} as const;
-
-const FPS = 30;
-const STEP_MS = 1000 / FPS;
-
-/** ==== MAP data ==== */
-const WALL = 0;
-const BISCUIT = 1;
-const EMPTY = 2;
-const BLOCK = 3;
-const PILL = 4;
-
-const MAP_DATA: number[][] = [
+/** ======== MAP & WALLS (asli, lengkap) ======== */
+const MAP:number[][]=[
   [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  [0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0],
-  [0,4,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,4,0],
-  [0,1,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,1,0],
-  [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
-  [0,1,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,1,0],
-  [0,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,0],
-  [0,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,0,0],
-  [2,2,2,0,1,0,1,1,1,1,1,1,1,0,1,0,2,2,2],
-  [0,0,0,0,1,0,1,0,0,3,0,0,1,0,1,0,0,0,0],
-  [2,2,2,2,1,1,1,0,3,3,3,0,1,1,1,2,2,2,2],
-  [0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0],
-  [2,2,2,0,1,0,1,1,1,2,1,1,1,0,1,0,2,2,2],
-  [0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0],
-  [0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0],
-  [0,1,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,1,0],
-  [0,4,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,4,0],
-  [0,0,1,0,1,0,1,0,0,0,0,0,1,0,1,0,1,0,0],
-  [0,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,0],
-  [0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0],
-  [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
-  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+	[0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0],
+	[0,4,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,4,0],
+	[0,1,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,1,0],
+	[0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+	[0,1,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,1,0],
+	[0,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,0],
+	[0,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,0,0],
+	[2,2,2,0,1,0,1,1,1,1,1,1,1,0,1,0,2,2,2],
+	[0,0,0,0,1,0,1,0,0,3,0,0,1,0,1,0,0,0,0],
+	[2,2,2,2,1,1,1,0,3,3,3,0,1,1,1,2,2,2,2],
+	[0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0],
+	[2,2,2,0,1,0,1,1,1,2,1,1,1,0,1,0,2,2,2],
+	[0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0],
+	[0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0],
+	[0,1,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,1,0],
+	[0,4,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,4,0],
+	[0,0,1,0,1,0,1,0,0,0,0,0,1,0,1,0,1,0,0],
+	[0,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,0],
+	[0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0],
+	[0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+	[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 ];
 
-type WallCmd =
-  | { move: [number, number] }
-  | { line: [number, number] }
-  | { curve: [number, number, number, number] };
-
-const WALLS: WallCmd[][] = [
-  [{move:[0,9.5]},{line:[3,9.5]},{curve:[3.5,9.5,3.5,9]},{line:[3.5,8]},{curve:[3.5,7.5,3,7.5]},{line:[1,7.5]},{curve:[0.5,7.5,0.5,7]},{line:[0.5,1]},{curve:[0.5,0.5,1,0.5]},{line:[9,0.5]},{curve:[9.5,0.5,9.5,1]},{line:[9.5,3.5]}],
-  [{move:[9.5,1]},{curve:[9.5,0.5,10,0.5]},{line:[18,0.5]},{curve:[18.5,0.5,18.5,1]},{line:[18.5,7]},{curve:[18.5,7.5,18,7.5]},{line:[16,7.5]},{curve:[15.5,7.5,15.5,8]},{line:[15.5,9]},{curve:[15.5,9.5,16,9.5]},{line:[19,9.5]}],
-  [{move:[2.5,5.5]},{line:[3.5,5.5]}],
-  [{move:[3,2.5]},{curve:[3.5,2.5,3.5,3]},{curve:[3.5,3.5,3,3.5]},{curve:[2.5,3.5,2.5,3]},{curve:[2.5,2.5,3,2.5]}],
-  [{move:[15.5,5.5]},{line:[16.5,5.5]}],
-  [{move:[16,2.5]},{curve:[16.5,2.5,16.5,3]},{curve:[16.5,3.5,16,3.5]},{curve:[15.5,3.5,15.5,3]},{curve:[15.5,2.5,16,2.5]}],
-  [{move:[6,2.5]},{line:[7,2.5]},{curve:[7.5,2.5,7.5,3]},{curve:[7.5,3.5,7,3.5]},{line:[6,3.5]},{curve:[5.5,3.5,5.5,3]},{curve:[5.5,2.5,6,2.5]}],
-  [{move:[12,2.5]},{line:[13,2.5]},{curve:[13.5,2.5,13.5,3]},{curve:[13.5,3.5,13,3.5]},{line:[12,3.5]},{curve:[11.5,3.5,11.5,3]},{curve:[11.5,2.5,12,2.5]}],
-  [{move:[7.5,5.5]},{line:[9,5.5]},{curve:[9.5,5.5,9.5,6]},{line:[9.5,7.5]}],
-  [{move:[9.5,6]},{curve:[9.5,5.5,10.5,5.5]},{line:[11.5,5.5]}],
-  [{move:[5.5,5.5]},{line:[5.5,7]},{curve:[5.5,7.5,6,7.5]},{line:[7.5,7.5]}],
-  [{move:[6,7.5]},{curve:[5.5,7.5,5.5,8]},{line:[5.5,9.5]}],
-  [{move:[13.5,5.5]},{line:[13.5,7]},{curve:[13.5,7.5,13,7.5]},{line:[11.5,7.5]}],
-  [{move:[13,7.5]},{curve:[13.5,7.5,13.5,8]},{line:[13.5,9.5]}],
-  [{move:[0,11.5]},{line:[3,11.5]},{curve:[3.5,11.5,3.5,12]},{line:[3.5,13]},{curve:[3.5,13.5,3,13.5]},{line:[1,13.5]},{curve:[0.5,13.5,0.5,14]},{line:[0.5,17]},{curve:[0.5,17.5,1,17.5]},{line:[1.5,17.5]}],
-  [{move:[1,17.5]},{curve:[0.5,17.5,0.5,18]},{line:[0.5,21]},{curve:[0.5,21.5,1,21.5]},{line:[18,21.5]},{curve:[18.5,21.5,18.5,21]},{line:[18.5,18]},{curve:[18.5,17.5,18,17.5]},{line:[17.5,17.5]}],
-  [{move:[18,17.5]},{curve:[18.5,17.5,18.5,17]},{line:[18.5,14]},{curve:[18.5,13.5,18,13.5]},{line:[16,13.5]},{curve:[15.5,13.5,15.5,13]},{line:[15.5,12]},{curve:[15.5,11.5,16,11.5]},{line:[19,11.5]}],
-  [{move:[5.5,11.5]},{line:[5.5,13.5]}],
-  [{move:[13.5,11.5]},{line:[13.5,13.5]}],
-  [{move:[2.5,15.5]},{line:[3,15.5]},{curve:[3.5,15.5,3.5,16]},{line:[3.5,17.5]}],
-  [{move:[16.5,15.5]},{line:[16,15.5]},{curve:[15.5,15.5,15.5,16]},{line:[15.5,17.5]}],
-  [{move:[5.5,15.5]},{line:[7.5,15.5]}],
-  [{move:[11.5,15.5]},{line:[13.5,15.5]}],
-  [{move:[2.5,19.5]},{line:[5,19.5]},{curve:[5.5,19.5,5.5,19]},{line:[5.5,17.5]}],
-  [{move:[5.5,19]},{curve:[5.5,19.5,6,19.5]},{line:[7.5,19.5]}],
-  [{move:[11.5,19.5]},{line:[13,19.5]},{curve:[13.5,19.5,13.5,19]},{line:[13.5,17.5]}],
-  [{move:[13.5,19]},{curve:[13.5,19.5,14,19.5]},{line:[16.5,19.5]}],
-  [{move:[7.5,13.5]},{line:[9,13.5]},{curve:[9.5,13.5,9.5,14]},{line:[9.5,15.5]}],
-  [{move:[9.5,14]},{curve:[9.5,13.5,10,13.5]},{line:[11.5,13.5]}],
-  [{move:[7.5,17.5]},{line:[9,17.5]},{curve:[9.5,17.5,9.5,18]},{line:[9.5,19.5]}],
-  [{move:[9.5,18]},{curve:[9.5,17.5,10,17.5]},{line:[11.5,17.5]}],
-  [{move:[8.5,9.5]},{line:[8,9.5]},{curve:[7.5,9.5,7.5,10]},{line:[7.5,11]},{curve:[7.5,11.5,8,11.5]},{line:[11,11.5]},{curve:[11.5,11.5,11.5,11]},{line:[11.5,10]},{curve:[11.5,9.5,11,9.5]},{line:[10.5,9.5]}],
+const WALLS:any[]=[
+  [{"move":[0,9.5]},{"line":[3,9.5]},{"curve":[3.5,9.5,3.5,9]},{"line":[3.5,8]},{"curve":[3.5,7.5,3,7.5]},{"line":[1,7.5]},{"curve":[0.5,7.5,0.5,7]},{"line":[0.5,1]},{"curve":[0.5,0.5,1,0.5]},{"line":[9,0.5]},{"curve":[9.5,0.5,9.5,1]},{"line":[9.5,3.5]}],
+  [{"move":[9.5,1]},{"curve":[9.5,0.5,10,0.5]},{"line":[18,0.5]},{"curve":[18.5,0.5,18.5,1]},{"line":[18.5,7]},{"curve":[18.5,7.5,18,7.5]},{"line":[16,7.5]},{"curve":[15.5,7.5,15.5,8]},{"line":[15.5,9]},{"curve":[15.5,9.5,16,9.5]},{"line":[19,9.5]}],
+  [{"move":[2.5,5.5]},{"line":[3.5,5.5]}],
+  [{"move":[3,2.5]},{"curve":[3.5,2.5,3.5,3]},{"curve":[3.5,3.5,3,3.5]},{"curve":[2.5,3.5,2.5,3]},{"curve":[2.5,2.5,3,2.5]}],
+  [{"move":[15.5,5.5]},{"line":[16.5,5.5]}],
+  [{"move":[16,2.5]},{"curve":[16.5,2.5,16.5,3]},{"curve":[16.5,3.5,16,3.5]},{"curve":[15.5,3.5,15.5,3]},{"curve":[15.5,2.5,16,2.5]}],
+  [{"move":[6,2.5]},{"line":[7,2.5]},{"curve":[7.5,2.5,7.5,3]},{"curve":[7.5,3.5,7,3.5]},{"line":[6,3.5]},{"curve":[5.5,3.5,5.5,3]},{"curve":[5.5,2.5,6,2.5]}],
+  [{"move":[12,2.5]},{"line":[13,2.5]},{"curve":[13.5,2.5,13.5,3]},{"curve":[13.5,3.5,13,3.5]},{"line":[12,3.5]},{"curve":[11.5,3.5,11.5,3]},{"curve":[11.5,2.5,12,2.5]}],
+  [{"move":[7.5,5.5]},{"line":[9,5.5]},{"curve":[9.5,5.5,9.5,6]},{"line":[9.5,7.5]}],
+  [{"move":[9.5,6]},{"curve":[9.5,5.5,10.5,5.5]},{"line":[11.5,5.5]}],
+  [{"move":[5.5,5.5]},{"line":[5.5,7]},{"curve":[5.5,7.5,6,7.5]},{"line":[7.5,7.5]}],
+  [{"move":[6,7.5]},{"curve":[5.5,7.5,5.5,8]},{"line":[5.5,9.5]}],
+  [{"move":[13.5,5.5]},{"line":[13.5,7]},{"curve":[13.5,7.5,13,7.5]},{"line":[11.5,7.5]}],
+  [{"move":[13,7.5]},{"curve":[13.5,7.5,13.5,8]},{"line":[13.5,9.5]}],
+  [{"move":[0,11.5]},{"line":[3,11.5]},{"curve":[3.5,11.5,3.5,12]},{"line":[3.5,13]},{"curve":[3.5,13.5,3,13.5]},{"line":[1,13.5]},{"curve":[0.5,13.5,0.5,14]},{"line":[0.5,17]},{"curve":[0.5,17.5,1,17.5]},{"line":[1.5,17.5]}],
+  [{"move":[1,17.5]},{"curve":[0.5,17.5,0.5,18]},{"line":[0.5,21]},{"curve":[0.5,21.5,1,21.5]},{"line":[18,21.5]},{"curve":[18.5,21.5,18.5,21]},{"line":[18.5,18]},{"curve":[18.5,17.5,18,17.5]},{"line":[17.5,17.5]}],
+  [{"move":[18,17.5]},{"curve":[18.5,17.5,18.5,17]},{"line":[18.5,14]},{"curve":[18.5,13.5,18,13.5]},{"line":[16,13.5]},{"curve":[15.5,13.5,15.5,13]},{"line":[15.5,12]},{"curve":[15.5,11.5,16,11.5]},{"line":[19,11.5]}],
+  [{"move":[5.5,11.5]},{"line":[5.5,13.5]}],
+  [{"move":[13.5,11.5]},{"line":[13.5,13.5]}],
+  [{"move":[2.5,15.5]},{"line":[3,15.5]},{"curve":[3.5,15.5,3.5,16]},{"line":[3.5,17.5]}],
+  [{"move":[16.5,15.5]},{"line":[16,15.5]},{"curve":[15.5,15.5,15.5,16]},{"line":[15.5,17.5]}],
+  [{"move":[5.5,15.5]},{"line":[7.5,15.5]}],
+  [{"move":[11.5,15.5]},{"line":[13.5,15.5]}],
+  [{"move":[2.5,19.5]},{"line":[5,19.5]},{"curve":[5.5,19.5,5.5,19]},{"line":[5.5,17.5]}],
+  [{"move":[5.5,19]},{"curve":[5.5,19.5,6,19.5]},{"line":[7.5,19.5]}],
+  [{"move":[11.5,19.5]},{"line":[13,19.5]},{"curve":[13.5,19.5,13.5,19]},{"line":[13.5,17.5]}],
+  [{"move":[13.5,19]},{"curve":[13.5,19.5,14,19.5]},{"line":[16.5,19.5]}],
+  [{"move":[7.5,13.5]},{"line":[9,13.5]},{"curve":[9.5,13.5,9.5,14]},{"line":[9.5,15.5]}],
+  [{"move":[9.5,14]},{"curve":[9.5,13.5,10,13.5]},{"line":[11.5,13.5]}],
+  [{"move":[7.5,17.5]},{"line":[9,17.5]},{"curve":[9.5,17.5,9.5,18]},{"line":[9.5,19.5]}],
+  [{"move":[9.5,18]},{"curve":[9.5,17.5,10,17.5]},{"line":[11.5,17.5]}],
+  [{"move":[8.5,9.5]},{"line":[8,9.5]},{"curve":[7.5,9.5,7.5,10]},{"line":[7.5,11]},{"curve":[7.5,11.5,8,11.5]},{"line":[11,11.5]},{"curve":[11.5,11.5,11.5,11]},{"line":[11.5,10]},{"curve":[11.5,9.5,11,9.5]},{"line":[10.5,9.5]}]
 ];
 
-const clone2D = (src: number[][]) => src.map((r) => r.slice());
+/** tools */
+const clone2D=(m:number[][])=>m.map(r=>r.slice());
 
-/** ==== Audio ==== */
-function useAudioManager(rootBase: string) {
-  const filesRef = useRef<AudioFileMap>({});
-  const playingRef = useRef<string[]>([]);
-  const soundDisabled = () =>
-    typeof window !== "undefined" && localStorage.getItem("soundDisabled") === "true";
-
-  const load = (name: string, path: string, onReady: () => void) => {
-    const a = document.createElement("audio");
-    a.setAttribute("preload", "true");
-    a.setAttribute("autobuffer", "true");
-    a.src = path;
-    const handler = () => {
-      a.removeEventListener("canplaythrough", handler, true);
-      onReady();
-    };
-    a.addEventListener("canplaythrough", handler, true);
-    a.pause();
-    filesRef.current[name] = a;
+/** =================== AUDIO =================== */
+function useAudio(root:string){
+  const files=useRef<Record<string,HTMLAudioElement>>({});
+  const playing=useRef<string[]>([]);
+  const disabled=()=>localStorage.getItem("soundDisabled")==="true";
+  const load=(name:string,src:string,cb:()=>void)=>{
+    const a=document.createElement("audio");
+    a.preload="true"; a.src=src;
+    const onReady=()=>{a.removeEventListener("canplaythrough",onReady,true); cb();};
+    a.addEventListener("canplaythrough",onReady,true);
+    files.current[name]=a; a.pause();
   };
-
-  const play = (name: string) => {
-    if (soundDisabled()) return;
-    const a = filesRef.current[name];
-    if (!a) return;
-    const ended = () => {
-      a.removeEventListener("ended", ended, true);
-      playingRef.current = playingRef.current.filter((n) => n !== name);
-    };
-    playingRef.current.push(name);
-    a.addEventListener("ended", ended, true);
-    a.currentTime = 0;
-    void a.play();
+  const play=(n:string)=>{ if(disabled()) return; const a=files.current[n]; if(!a) return;
+    const onEnd=()=>{a.removeEventListener("ended",onEnd,true); playing.current=playing.current.filter(x=>x!==n);};
+    playing.current.push(n); a.addEventListener("ended",onEnd,true); a.currentTime=0; void a.play();
   };
-
-  const pause = () => {
-    playingRef.current.forEach((n) => filesRef.current[n]?.pause());
-  };
-  const resume = () => {
-    if (soundDisabled()) return;
-    playingRef.current.forEach((n) => { const a = filesRef.current[n]; if (a) void a.play(); });
-  };
-  const disable = () => {
-    playingRef.current.forEach((n) => {
-      const a = filesRef.current[n];
-      if (a) { a.pause(); a.currentTime = 0; }
-    });
-    playingRef.current = [];
-  };
-
-  const loadAll = (onAll: () => void) => {
-    const ext = new Audio().canPlayType("audio/ogg") ? "ogg" : "mp3";
-    const assets: [string, string][] = [
-      ["start", `${rootBase}audio/opening_song.${ext}`],
-      ["die", `${rootBase}audio/die.${ext}`],
-      ["eatghost", `${rootBase}audio/eatghost.${ext}`],
-      ["eatpill", `${rootBase}audio/eatpill.${ext}`],
-      ["eating", `${rootBase}audio/eating.short.${ext}`],
-      ["eating2", `${rootBase}audio/eating.short.${ext}`],
+  const pause =()=>playing.current.forEach(n=>files.current[n]?.pause());
+  const resume=()=>!disabled()&&playing.current.forEach(n=>files.current[n]?.play());
+  const stopAll=()=>{playing.current.forEach(n=>{const a=files.current[n]; if(a){a.pause(); a.currentTime=0;}}); playing.current=[];};
+  const loadAll=(cb:()=>void)=>{
+    const ext=new Audio().canPlayType("audio/ogg")?"ogg":"mp3";
+    const arr:[string,string][]= [
+      ["start",`${root}audio/opening_song.${ext}`],
+      ["die",`${root}audio/die.${ext}`],
+      ["eatghost",`${root}audio/eatghost.${ext}`],
+      ["eatpill",`${root}audio/eatpill.${ext}`],
+      ["eating",`${root}audio/eating.short.${ext}`],
+      ["eating2",`${root}audio/eating.short.${ext}`],
     ];
-    let left = assets.length;
-    assets.forEach(([n, p]) =>
-      load(n, p, () => { if (--left === 0) onAll(); })
-    );
+    let left=arr.length;
+    arr.forEach(([n,p])=>load(n,p,()=>{ if(--left===0) cb(); }));
   };
-
-  return { loadAll, play, pause, resume, disable };
+  return {loadAll,play,pause,resume,stopAll};
 }
 
-/** ==== Component ==== */
+/** =================== MAIN COMPONENT =================== */
 export default function ClassicPacman({
   wallet,
   username,
   onScoreSubmit,
-  rootAssetBase = "https://raw.githubusercontent.com/daleharvey/pacman/master/",
-}: {
-  wallet: string | null;
-  username: string | null;
-  onScoreSubmit?: (finalScore: number) => void;
-  rootAssetBase?: string;
+  rootAssetBase="https://raw.githubusercontent.com/daleharvey/pacman/master/",
+}:{
+  wallet:string|null;
+  username:string|null;
+  onScoreSubmit?:OnScoreSubmit;
+  rootAssetBase?:string;
 }) {
-  // two layers
-  const bgRef = useRef<HTMLCanvasElement | null>(null);
-  const fxRef = useRef<HTMLCanvasElement | null>(null);
+  const bgRef=useRef<HTMLCanvasElement|null>(null);
+  const fxRef=useRef<HTMLCanvasElement|null>(null);
 
-  const [state, setState] = useState<number>(WAITING);
-  const [level, setLevel] = useState<number>(1);
-  const [score, setScore] = useState<number>(0);
-  const [lives, setLives] = useState<number>(3);
-  const [loaded, setLoaded] = useState<boolean>(false);
+  const [state,setState]=useState(WAITING);
+  const [level,setLevel]=useState(1);
+  const [score,setScore]=useState(0);
+  const [lives,setLives]=useState(3);
+  const [audioReady,setAudioReady]=useState(false);
 
-  const isMobile = useMemo(
-    () => (typeof window !== "undefined" ? window.matchMedia("(pointer: coarse)").matches : false),
-    []
-  );
+  const audio=useAudio(rootAssetBase);
 
-  // game internals
-  const tickRef = useRef(0);
-  const eatenCountRef = useRef(0);
-  const stateChangedRef = useRef(true);
-  const timerStartRef = useRef(0);
-  const lastCountdownRef = useRef(0);
+  /** runtime */
+  const mapRef=useRef<number[][]>(clone2D(MAP));
+  const blockSizeRef=useRef(18);
+  const tickRef=useRef(0);
+  const eatenCountRef=useRef(0);
+  const timerStartRef=useRef(0);
+  const lastCountdownRef=useRef(0);
 
-  // raf
-  const rafRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
-  const accRef = useRef<number>(0);
+  const userPos=useRef<Vec>({x:90,y:120});
+  const userDir=useRef<number>(LEFT);
+  const userDue=useRef<number>(LEFT);
 
-  // map/grid
-  const mapRef = useRef(clone2D(MAP_DATA));
-  const pillPulseRef = useRef(0);
-  const blockSizeRef = useRef(18);
+  type Ghost={pos:Vec;dir:number;due:number;eatable:number|null;eaten:number|null;color:string};
+  const ghosts=useRef<Ghost[]>([]);
+  const ghostColors=["#00FFDE","#FF0000","#FFB8DE","#FFB847"];
 
-  // entities
-  const userPosRef = useRef<Vec>({ x: 90, y: 120 });
-  const userDirRef = useRef<number>(LEFT);
-  const userDueRef = useRef<number>(LEFT);
-
-  type Ghost = {
-    pos: Vec;
-    dir: number;
-    due: number;
-    eatableTick: number | null;
-    eatenTick: number | null;
-    colour: string;
-  };
-  const ghostsRef = useRef<Ghost[]>([]);
-  const ghostColours = ["#00FFDE", "#FF0000", "#FFB8DE", "#FFB847"];
-
-  // audio
-  const audio = useAudioManager(rootAssetBase);
-
-  /** Utils */
-  const getTick = () => tickRef.current;
-  const pointToCoord = (x: number) => Math.round(x / 10);
-  const onWhole = (x: number) => x % 10 === 0;
-  const onGrid = (p: Vec) => onWhole(p.x) && onWhole(p.y);
-  const nextSquare = (x: number, dir: number) => {
-    const rem = x % 10;
-    if (rem === 0) return x;
-    if (dir === RIGHT || dir === DOWN) return x + (10 - rem);
-    return x - rem;
-  };
-  const next = (pos: Vec, dir: number) => ({
-    y: pointToCoord(nextSquare(pos.y, dir)),
-    x: pointToCoord(nextSquare(pos.x, dir)),
-  });
-  const within = (h: number, w: number, y: number, x: number) =>
-    y >= 0 && y < h && x >= 0 && x < w;
-  const isWall = (pos: { y: number; x: number }) =>
-    within(mapRef.current.length, mapRef.current[0].length, pos.y, pos.x) &&
-    mapRef.current[pos.y][pos.x] === WALL;
-  const isFloor = (pos: { y: number; x: number }) => {
-    if (!within(mapRef.current.length, mapRef.current[0].length, pos.y, pos.x)) return false;
-    const v = mapRef.current[pos.y][pos.x];
-    return v === EMPTY || v === BISCUIT || v === PILL;
+  /** helpers grid */
+  const getTick=()=>tickRef.current;
+  const point=(x:number)=>Math.round(x/10);
+  const onWhole=(x:number)=>x%10===0;
+  const onGrid=(p:Vec)=>onWhole(p.x)&&onWhole(p.y);
+  const nextSquare=(x:number,dir:number)=>{const r=x%10; if(r===0)return x; return (dir===RIGHT||dir===DOWN)?x+(10-r):x-r;};
+  const next=(p:Vec,dir:number)=>({y:point(nextSquare(p.y,dir)),x:point(nextSquare(p.x,dir))});
+  const inB=(y:number,x:number)=>y>=0&&y<mapRef.current.length&&x>=0&&x<mapRef.current[0].length;
+  const isWall=(pos:{y:number;x:number})=>inB(pos.y,pos.x)&&mapRef.current[pos.y][pos.x]===WALL;
+  const isFloor=(pos:{y:number;x:number})=>{
+    if(!inB(pos.y,pos.x))return false;
+    const v=mapRef.current[pos.y][pos.x];
+    return v===EMPTY||v===BISCUIT||v===PILL;
   };
 
-  /** Drawing (BG layer) */
-  const drawWalls = (ctx: CanvasRenderingContext2D) => {
-    const s = blockSizeRef.current;
-    ctx.strokeStyle = "#00F";
-    ctx.lineWidth = 5;
-    ctx.lineCap = "round";
-    for (const line of WALLS) {
+  /** drawing */
+  const drawWalls=(ctx:CanvasRenderingContext2D)=>{
+    const s=blockSizeRef.current; ctx.strokeStyle="#00F"; ctx.lineWidth=5; ctx.lineCap="round";
+    for(const line of WALLS){
       ctx.beginPath();
-      for (const seg of line) {
-        if ("move" in seg) ctx.moveTo(seg.move[0] * s, seg.move[1] * s);
-        else if ("line" in seg) ctx.lineTo(seg.line[0] * s, seg.line[1] * s);
-        else ctx.quadraticCurveTo(seg.curve[0] * s, seg.curve[1] * s, seg.curve[2] * s, seg.curve[3] * s);
+      for(const seg of line){
+        if(seg.move) ctx.moveTo(seg.move[0]*s, seg.move[1]*s);
+        else if(seg.line) ctx.lineTo(seg.line[0]*s, seg.line[1]*s);
+        else if(seg.curve) ctx.quadraticCurveTo(seg.curve[0]*s, seg.curve[1]*s, seg.curve[2]*s, seg.curve[3]*s);
       }
       ctx.stroke();
     }
   };
-  const drawBlock = (y: number, x: number, ctx: CanvasRenderingContext2D) => {
-    const layout = mapRef.current[y][x];
-    const s = blockSizeRef.current;
-    ctx.beginPath();
-    ctx.fillStyle = "#000";
-    ctx.fillRect(x * s, y * s, s, s);
-    if (layout === BISCUIT) {
-      ctx.fillStyle = "#FFF";
-      ctx.fillRect(x * s + s / 2.5, y * s + s / 2.5, s / 6, s / 6);
-    }
-    ctx.closePath();
-  };
-  const drawBG = (ctx: CanvasRenderingContext2D) => {
-    const s = blockSizeRef.current;
-    const h = mapRef.current.length;
-    const w = mapRef.current[0].length;
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, w * s, h * s);
+
+  const drawBG=()=>{
+    const c=bgRef.current; if(!c) return; const ctx=c.getContext("2d"); if(!ctx) return;
+    const s=blockSizeRef.current,h=mapRef.current.length,w=mapRef.current[0].length;
+    ctx.fillStyle="#000"; ctx.fillRect(0,0,w*s,h*s);
     drawWalls(ctx);
-    for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) drawBlock(i, j, ctx);
   };
 
-  /** FX layer drawing */
-  const drawPills = (ctx: CanvasRenderingContext2D) => {
-    const s = blockSizeRef.current;
-    pillPulseRef.current = (pillPulseRef.current + 1) % 31;
-    for (let i = 0; i < mapRef.current.length; i++) {
-      for (let j = 0; j < mapRef.current[0].length; j++) {
-        if (mapRef.current[i][j] === PILL) {
-          ctx.beginPath();
-          ctx.fillStyle = "#FFF";
-          const r = Math.abs(5 - pillPulseRef.current / 3);
-          ctx.arc(j * s + s / 2, i * s + s / 2, r, 0, Math.PI * 2, false);
-          ctx.fill();
-          ctx.closePath();
-        }
+  const drawFood=(ctx:CanvasRenderingContext2D,pulse:number)=>{
+    const s=blockSizeRef.current,h=mapRef.current.length,w=mapRef.current[0].length;
+    // biscuits
+    ctx.fillStyle="#FFF";
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+      if(mapRef.current[y][x]===BISCUIT){
+        ctx.fillRect(x*s+s/2.5, y*s+s/2.5, s/6, s/6);
+      }
+    }
+    // pills
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+      if(mapRef.current[y][x]===PILL){
+        ctx.beginPath();
+        const r=Math.abs(5 - pulse/3);
+        ctx.arc(x*s+s/2, y*s+s/2, r, 0, Math.PI*2, false);
+        ctx.fill();
+        ctx.closePath();
       }
     }
   };
-  const dialog = (ctx: CanvasRenderingContext2D, text: string) => {
-    ctx.fillStyle = "#FF0";
-    ctx.font = "18px Calibri, Arial, sans-serif";
-    const width = ctx.measureText(text).width;
-    const x = (mapRef.current[0].length * blockSizeRef.current - width) / 2;
-    ctx.fillText(text, x, mapRef.current.length * 10 + 8);
+
+  const drawDialog=(ctx:CanvasRenderingContext2D,text:string)=>{
+    ctx.fillStyle="#FF0"; ctx.font="18px Calibri, Arial, sans-serif";
+    const w=mapRef.current[0].length*blockSizeRef.current;
+    const x=(w-ctx.measureText(text).width)/2;
+    ctx.fillText(text,x,mapRef.current.length*10 + 8);
   };
-  const drawFooter = (ctx: CanvasRenderingContext2D) => {
-    const top = mapRef.current.length * blockSizeRef.current;
-    const textBase = top + 17;
-    const wPx = mapRef.current[0].length * blockSizeRef.current;
 
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, top, wPx, 30);
-
+  const drawFooter=(ctx:CanvasRenderingContext2D)=>{
+    const s=blockSizeRef.current;
+    const top=mapRef.current.length*s, w=mapRef.current[0].length*s, textY=top+17;
+    ctx.fillStyle="#000"; ctx.fillRect(0,top,w,30);
     // lives
-    ctx.fillStyle = "#FF0";
-    for (let i = 0; i < lives; i++) {
+    ctx.fillStyle="#FF0";
+    for(let i=0;i<lives;i++){
       ctx.beginPath();
-      const cx = 150 + 25 * i + blockSizeRef.current / 2;
-      const cy = top + 1 + blockSizeRef.current / 2;
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, blockSizeRef.current / 2, Math.PI * 0.25, Math.PI * 1.75, false);
-      ctx.fill();
+      const cx=150+25*i + s/2, cy=top+1+s/2;
+      ctx.moveTo(cx,cy); ctx.arc(cx,cy,s/2,Math.PI*0.25,Math.PI*1.75,false); ctx.fill();
     }
-
-    const soundOff = typeof window !== "undefined" && localStorage.getItem("soundDisabled") === "true";
-    ctx.fillStyle = !soundOff ? "#0F0" : "#F00";
-    ctx.font = "bold 16px sans-serif";
-    ctx.fillText("s", 10, textBase);
-
-    ctx.fillStyle = "#FF0";
-    ctx.font = "14px Calibri, Arial, sans-serif";
-    ctx.fillText(`Score: ${score}`, 30, textBase);
-    ctx.fillText(`Level: ${level}`, 260, textBase);
+    const mute = localStorage.getItem("soundDisabled")==="true";
+    ctx.fillStyle=mute?"#F00":"#0F0"; ctx.font="bold 16px sans-serif"; ctx.fillText("s",10,textY);
+    ctx.fillStyle="#FF0"; ctx.font="14px Calibri, Arial, sans-serif";
+    ctx.fillText(`Score: ${score}`,30,textY); ctx.fillText(`Level: ${level}`,260,textY);
   };
-  const drawUser = (ctx: CanvasRenderingContext2D) => {
-    const s = blockSizeRef.current;
-    const calcAngle = (dir: number, pos: Vec) => {
-      if (dir === RIGHT && pos.x % 10 < 5) return { start: 0.25, end: 1.75, rev: false };
-      if (dir === DOWN && pos.y % 10 < 5) return { start: 0.75, end: 2.25, rev: false };
-      if (dir === UP && pos.y % 10 < 5) return { start: 1.25, end: 1.75, rev: true };
-      if (dir === LEFT && pos.x % 10 < 5) return { start: 0.75, end: 1.25, rev: true };
-      return { start: 0, end: 2, rev: false };
+
+  const drawUser=(ctx:CanvasRenderingContext2D)=>{
+    const s=blockSizeRef.current, p=userPos.current;
+    const ang=(d:number,pos:Vec)=>{
+      if(d===RIGHT && pos.x%10<5) return {a:0.25,b:1.75,rev:false};
+      if(d===DOWN  && pos.y%10<5) return {a:0.75,b:2.25,rev:false};
+      if(d===UP    && pos.y%10<5) return {a:1.25,b:1.75,rev:true};
+      if(d===LEFT  && pos.x%10<5) return {a:0.75,b:1.25,rev:true};
+      return {a:0,b:2,rev:false};
     };
-    const angle = calcAngle(userDirRef.current, userPosRef.current);
-    ctx.fillStyle = "#FF0";
-    ctx.beginPath();
-    ctx.moveTo((userPosRef.current.x / 10) * s + s / 2, (userPosRef.current.y / 10) * s + s / 2);
-    ctx.arc(
-      (userPosRef.current.x / 10) * s + s / 2,
-      (userPosRef.current.y / 10) * s + s / 2,
-      s / 2, Math.PI * angle.start, Math.PI * angle.end, angle.rev
-    );
+    const A=ang(userDir.current,p);
+    ctx.fillStyle="#FF0"; ctx.beginPath();
+    ctx.moveTo((p.x/10)*s + s/2, (p.y/10)*s + s/2);
+    ctx.arc((p.x/10)*s + s/2, (p.y/10)*s + s/2, s/2, Math.PI*A.a, Math.PI*A.b, A.rev);
     ctx.fill();
   };
-  const drawUserDead = (ctx: CanvasRenderingContext2D, amount: number) => {
-    const s = blockSizeRef.current;
-    const half = s / 2;
-    if (amount >= 1) return;
-    ctx.fillStyle = "#FF0";
-    ctx.beginPath();
-    const cx = (userPosRef.current.x / 10) * s + half;
-    const cy = (userPosRef.current.y / 10) * s + half;
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, half, 0, Math.PI * 2 * amount, true);
-    ctx.fill();
+
+  const drawUserDead=(ctx:CanvasRenderingContext2D,t:number)=>{
+    const s=blockSizeRef.current, p=userPos.current, half=s/2;
+    if(t>=1) return; ctx.fillStyle="#FF0"; ctx.beginPath();
+    const cx=(p.x/10)*s + half, cy=(p.y/10)*s + half;
+    ctx.moveTo(cx,cy); ctx.arc(cx,cy,half,0,Math.PI*2*t,true); ctx.fill();
   };
-  function drawGhost(ctx: CanvasRenderingContext2D, g: Ghost): void {
-    const s = blockSizeRef.current;
-    const top = (g.pos.y / 10) * s;
-    const left = (g.pos.x / 10) * s;
 
-    const secondsAgo = (tick: number | null) =>
-      tick === null ? Number.MAX_SAFE_INTEGER : (getTick() - tick) / FPS;
-    const eatable = g.eatableTick !== null ? secondsAgo(g.eatableTick) : Number.MAX_SAFE_INTEGER;
-    const eatenAgo = g.eatenTick !== null ? secondsAgo(g.eatenTick) : Number.MAX_SAFE_INTEGER;
+  const secAgo=(tick:number|null)=> tick==null?1e9:(getTick()-tick)/FPS;
 
-    let colour: string;
-    if (g.eatableTick !== null) colour = eatable > 5 ? (getTick() % 20 > 10 ? "#FFF" : "#00B") : "#00B";
-    else if (g.eatenTick !== null) colour = "#222";
-    else colour = g.colour;
+  const drawGhost=(ctx:CanvasRenderingContext2D,g:Ghost)=>{
+    const s=blockSizeRef.current, top=(g.pos.y/10)*s, left=(g.pos.x/10)*s;
+    let col=g.color;
+    if(g.eatable!=null) col = secAgo(g.eatable)>5 ? (getTick()%20>10?"#FFF":"#00B") : "#00B";
+    else if(g.eaten!=null) col="#222";
+    if(g.eatable!=null && secAgo(g.eatable)>8) g.eatable=null;
+    if(g.eaten!=null   && secAgo(g.eaten)>3)   g.eaten=null;
 
-    if (g.eatableTick !== null && eatable > 8) g.eatableTick = null;
-    if (g.eatenTick !== null && eatenAgo > 3) g.eatenTick = null;
+    const tl=left+s, base=top+s-3, inc=s/10, high=getTick()%10>5?3:-3, low=getTick()%10>5?-3:3;
+    ctx.fillStyle=col; ctx.beginPath();
+    ctx.moveTo(left,base); ctx.quadraticCurveTo(left,top,left+s/2,top); ctx.quadraticCurveTo(left+s,top,left+s,base);
+    ctx.quadraticCurveTo(tl-inc*1,base+high,tl-inc*2,base);
+    ctx.quadraticCurveTo(tl-inc*3,base+low, tl-inc*4,base);
+    ctx.quadraticCurveTo(tl-inc*5,base+high,tl-inc*6,base);
+    ctx.quadraticCurveTo(tl-inc*7,base+low, tl-inc*8,base);
+    ctx.quadraticCurveTo(tl-inc*9,base+high,tl-inc*10,base);
+    ctx.closePath(); ctx.fill();
 
-    const tl = left + s;
-    const base = top + s - 3;
-    const inc = s / 10;
-    const high = getTick() % 10 > 5 ? 3 : -3;
-    const low = getTick() % 10 > 5 ? -3 : 3;
+    ctx.beginPath(); ctx.fillStyle="#FFF";
+    ctx.arc(left+6, top+6, s/6, 0, 300, false);
+    ctx.arc(left+s-6, top+6, s/6, 0, 300, false);
+    ctx.closePath(); ctx.fill();
 
-    ctx.fillStyle = colour;
-    ctx.beginPath();
-    ctx.moveTo(left, base);
-    ctx.quadraticCurveTo(left, top, left + s / 2, top);
-    ctx.quadraticCurveTo(left + s, top, left + s, base);
-
-    ctx.quadraticCurveTo(tl - inc * 1, base + high, tl - inc * 2, base);
-    ctx.quadraticCurveTo(tl - inc * 3, base + low, tl - inc * 4, base);
-    ctx.quadraticCurveTo(tl - inc * 5, base + high, tl - inc * 6, base);
-    ctx.quadraticCurveTo(tl - inc * 7, base + low, tl - inc * 8, base);
-    ctx.quadraticCurveTo(tl - inc * 9, base + high, tl - inc * 10, base);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.fillStyle = "#FFF";
-    ctx.arc(left + 6, top + 6, s / 6, 0, 300, false);
-    ctx.arc(left + s - 6, top + 6, s / 6, 0, 300, false);
-    ctx.closePath();
-    ctx.fill();
-
-    const f = s / 12;
-    const off: Record<number, [number, number]> = {
-      [RIGHT]: [f, 0], [LEFT]: [-f, 0], [UP]: [0, -f], [DOWN]: [0, f], [NONE]: [0, 0],
-    };
-    const o = off[g.dir] ?? [0, 0];
-
-    ctx.beginPath();
-    ctx.fillStyle = "#000";
-    ctx.arc(left + 6 + o[0], top + 6 + o[1], s / 15, 0, 300, false);
-    ctx.arc(left + s - 6 + o[0], top + 6 + o[1], s / 15, 0, 300, false);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  /** Movement */
-  const userNewCoord = (dir: number, cur: Vec): Vec => ({
-    x: cur.x + ((dir === LEFT && -2) || (dir === RIGHT && 2) || 0),
-    y: cur.y + ((dir === DOWN && 2) || (dir === UP && -2) || 0),
-  });
-
-  const ghostAddBounded = (x1: number, x2: number) => {
-    const rem = x1 % 10;
-    const result = rem + x2;
-    if (rem !== 0 && result > 10) return x1 + (10 - rem);
-    if (rem > 0 && result < 0) return x1 - rem;
-    return x1 + x2;
+    const f=s/12, offs:Record<number,[number,number]>={[RIGHT]:[f,0],[LEFT]:[-f,0],[UP]:[0,-f],[DOWN]:[0,f],[NONE]:[0,0]};
+    const o=offs[g.dir]??[0,0];
+    ctx.beginPath(); ctx.fillStyle="#000";
+    ctx.arc(left+6+o[0], top+6+o[1], s/15, 0, 300, false);
+    ctx.arc(left+s-6+o[0], top+6+o[1], s/15, 0, 300, false);
+    ctx.closePath(); ctx.fill();
   };
-  const ghostNewCoord = (dir: number, cur: Vec, g: { eatableTick: number | null; eatenTick: number | null }): Vec => {
-    const speed = g.eatableTick !== null ? 1 : g.eatenTick !== null ? 4 : 2;
-    const xSpeed = dir === LEFT ? -speed : dir === RIGHT ? speed : 0;
-    const ySpeed = dir === DOWN ? speed : dir === UP ? -speed : 0;
-    return { x: ghostAddBounded(cur.x, xSpeed), y: ghostAddBounded(cur.y, ySpeed) };
+
+  /** movement helpers */
+  const userCoord=(d:number,c:Vec):Vec=>({x:c.x+((d===LEFT&&-2)||(d===RIGHT&&2)||0), y:c.y+((d===DOWN&&2)||(d===UP&&-2)||0)});
+  const bound=(x1:number,x2:number)=>{const r=x1%10,res=r+x2; if(r!==0&&res>10) return x1+(10-r); if(r>0&&res<0) return x1-r; return x1+x2;};
+  const ghostCoord=(d:number,c:Vec,g:Ghost):Vec=>{
+    const sp=g.eatable!=null?1:g.eaten!=null?4:2;
+    const xs=(d===LEFT?-sp:d===RIGHT?sp:0), ys=(d===DOWN?sp:d===UP?-sp:0);
+    return {x:bound(c.x,xs), y:bound(c.y,ys)};
   };
-  const ghostOpposite = (dir: number) =>
-    (dir === LEFT && RIGHT) || (dir === RIGHT && LEFT) || (dir === UP && DOWN) || UP;
+  const opposite=(d:number)=>(d===LEFT&&RIGHT)||(d===RIGHT&&LEFT)||(d===UP&&DOWN)||UP;
 
-  const isOnSamePlane = (a: number, b: number) =>
-    ((a === LEFT || a === RIGHT) && (b === LEFT || b === RIGHT)) ||
-    ((a === UP || a === DOWN) && (b === UP || b === DOWN));
-
-  const pane = (pos: Vec, dir: number): Vec | false => {
-    if (pos.y === 100 && pos.x >= 190 && dir === RIGHT) return { y: 100, x: -10 };
-    if (pos.y === 100 && pos.x <= -10 && dir === LEFT) return { y: 100, x: 190 };
+  const pane=(pos:Vec,dir:number):Vec|false=>{
+    if(pos.y===100 && dir===RIGHT && pos.x>=190) return {y:100,x:-10};
+    if(pos.y===100 && dir===LEFT  && pos.x<=-10) return {y:100,x:190};
     return false;
   };
 
-  /** Gameplay handlers */
-  const eatenPill = () => {
-    audio.play("eatpill");
-    timerStartRef.current = getTick();
-    eatenCountRef.current = 0;
-    ghostsRef.current = ghostsRef.current.map((g) => ({
-      ...g,
-      dir: ghostOpposite(g.dir),
-      eatableTick: getTick(),
-    }));
+  /** events */
+  const eatenPill=()=>{
+    audio.play("eatpill"); timerStartRef.current=getTick(); eatenCountRef.current=0;
+    ghosts.current=ghosts.current.map(g=>({...g, dir:opposite(g.dir), eatable:getTick()}));
   };
 
-  const completedLevel = () => {
+  const startLevel=()=>{
+    userPos.current={x:90,y:120}; userDir.current=LEFT; userDue.current=LEFT;
+    ghosts.current=ghostColors.map(c=>({pos:{x:90,y:80},dir:Math.random()<0.5?UP:DOWN,due:Math.random()<0.5?LEFT:RIGHT,eatable:null,eaten:null,color:c}));
+    audio.play("start"); timerStartRef.current=getTick(); setState(COUNTDOWN);
+  };
+
+  const startNew=()=>{
+    setState(WAITING); setLevel(1); setLives(3); setScore(0);
+    mapRef.current=clone2D(MAP); startLevel();
+  };
+
+  const loseLife=(fx:CanvasRenderingContext2D)=>{
     setState(WAITING);
-    setLevel((lv) => lv + 1);
-    mapRef.current = clone2D(MAP_DATA);
-    userPosRef.current = { x: 90, y: 120 };
-    userDirRef.current = LEFT;
-    userDueRef.current = LEFT;
-    startLevel();
-  };
-
-  const startLevel = () => {
-    ghostsRef.current = ghostColours.map((c) => ({
-      pos: { x: 90, y: 80 },
-      dir: Math.random() < 0.5 ? UP : DOWN,
-      due: Math.random() < 0.5 ? LEFT : RIGHT,
-      eatableTick: null,
-      eatenTick: null,
-      colour: c,
-    }));
-    audio.play("start");
-    timerStartRef.current = getTick();
-    setState(COUNTDOWN);
-    stateChangedRef.current = true;
-  };
-
-  const startNewGame = () => {
-    setState(WAITING);
-    setLevel(1);
-    setLives(3);
-    setScore(0);
-    mapRef.current = clone2D(MAP_DATA);
-    userPosRef.current = { x: 90, y: 120 };
-    userDirRef.current = LEFT;
-    userDueRef.current = LEFT;
-    startLevel();
-  };
-
-  const loseLife = (fx: CanvasRenderingContext2D) => {
-    setState(WAITING);
-    setLives((v) => {
-      const left = v - 1;
-      if (left > 0) startLevel();
-      else {
-        fx.clearRect(0, 0, fx.canvas.width, fx.canvas.height);
-        dialog(fx, "GAME OVER");
-        if (typeof onScoreSubmit === "function") onScoreSubmit(score);
+    setLives(prev=>{
+      const left=prev-1;
+      if(left>0) startLevel();
+      else{
+        fx.clearRect(0,0,fx.canvas.width,fx.canvas.height);
+        drawDialog(fx,"GAME OVER");
+        onScoreSubmit?.(score);
       }
       return left;
     });
   };
 
-  /** Core step (fixed timestep) */
-  const step = () => {
-    const fx = fxRef.current?.getContext("2d");
-    if (!fx) return;
+  /** ===== Fixed-step STEP ===== */
+  const pulseRef=useRef(0);
+  const step=()=>{
+    const fx=fxRef.current?.getContext("2d"); if(!fx) return;
+    const s=blockSizeRef.current, W=mapRef.current[0].length*s, H=mapRef.current.length*s;
 
-    // clear entity layer
-    fx.clearRect(0, 0, fx.canvas.width, fx.canvas.height);
+    fx.clearRect(0,0,W,H);
+    drawFood(fx,pulseRef.current);
 
-    // pills pulse
-    drawPills(fx);
+    if(state===PLAYING){
+      // GHOSTS
+      ghosts.current=ghosts.current.map(g=>{
+        const onG=onGrid(g.pos);
+        let due=g.due;
 
-    if (state === PLAYING) {
-      // ghosts
-      ghostsRef.current = ghostsRef.current.map((g) => {
-        const onGridSq = onGrid(g.pos);
-        let newDue = g.due;
-        if (onGridSq) {
-          newDue = g.dir === LEFT || g.dir === RIGHT
-            ? (Math.random() < 0.5 ? UP : DOWN)
-            : (Math.random() < 0.5 ? LEFT : RIGHT);
+        const forward=ghostCoord(g.dir,g.pos,g);
+        const fBlocked = onG && isWall({y:point(nextSquare(forward.y,g.dir)), x:point(nextSquare(forward.x,g.dir))});
+
+        if(onG && fBlocked){
+          const moves=(g.dir===LEFT||g.dir===RIGHT)?[UP,DOWN]:[LEFT,RIGHT];
+          const opts=moves.filter(m=>{
+            if(m===opposite(g.dir)) return false;
+            const np=ghostCoord(m,g.pos,g);
+            return !isWall({y:point(nextSquare(np.y,m)), x:point(nextSquare(np.x,m))});
+          });
+          if(opts.length>0) due=opts[Math.floor(Math.random()*opts.length)];
         }
-        let npos = ghostNewCoord(newDue, g.pos, g);
-        if (onGridSq && isWall({ y: pointToCoord(nextSquare(npos.y, newDue)), x: pointToCoord(nextSquare(npos.x, newDue)) })) {
-          npos = ghostNewCoord(g.dir, g.pos, g);
-          if (onGridSq && isWall({ y: pointToCoord(nextSquare(npos.y, g.dir)), x: pointToCoord(nextSquare(npos.x, g.dir)) })) {
-            npos = g.pos;
-          } else {
-            // keep dir
-          }
-        } else {
-          g.dir = newDue;
+
+        let npos=ghostCoord(due,g.pos,g);
+        if(onG && isWall({y:point(nextSquare(npos.y,due)),x:point(nextSquare(npos.x,due))})){
+          due=opposite(g.dir);
+          npos=ghostCoord(due,g.pos,g);
+          if(onG && isWall({y:point(nextSquare(npos.y,due)),x:point(nextSquare(npos.x,due))})) npos=g.pos;
         }
-        const wrap = pane(npos, g.dir);
-        if (wrap) npos = wrap;
-        return { ...g, pos: npos, due: newDue };
+
+        const wrap=pane(npos,due); if(wrap) npos=wrap;
+        return {...g,pos:npos,dir:due,due};
       });
 
-      // user
-      let npos = userNewCoord(userDueRef.current, userPosRef.current);
-      if (
-        (userDueRef.current === userDirRef.current && isOnSamePlane(userDueRef.current, userDirRef.current)) ||
-        (onGrid(userPosRef.current) && isFloor(next(npos, userDueRef.current)))
-      ) {
-        userDirRef.current = userDueRef.current;
+      // USER
+      let npos=userCoord(userDue.current,userPos.current);
+      const samePlane= ((userDue.current===LEFT||userDue.current===RIGHT)&&(userDir.current===LEFT||userDir.current===RIGHT)) ||
+                       ((userDue.current===UP||userDue.current===DOWN )&&(userDir.current===UP  ||userDir.current===DOWN));
+      if(samePlane || (onGrid(userPos.current) && isFloor(next(npos,userDue.current)))){
+        userDir.current=userDue.current;
       } else {
-        npos = userNewCoord(userDirRef.current, userPosRef.current);
+        npos=userCoord(userDir.current,userPos.current);
       }
-      if (onGrid(userPosRef.current) && isWall(next(npos, userDirRef.current))) {
-        userDirRef.current = NONE;
-      }
-      if (userDirRef.current !== NONE) {
-        if (npos.y === 100 && npos.x >= 190 && userDirRef.current === RIGHT) npos = { y: 100, x: -10 };
-        if (npos.y === 100 && npos.x <= -12 && userDirRef.current === LEFT) npos = { y: 100, x: 190 };
-        userPosRef.current = npos;
+      if(onGrid(userPos.current) && isWall(next(npos,userDir.current))) userDir.current=NONE;
+      if(userDir.current!==NONE){
+        if(npos.y===100 && npos.x>=190 && userDir.current===RIGHT) npos={y:100,x:-10};
+        if(npos.y===100 && npos.x<=-12 && userDir.current===LEFT)  npos={y:100,x:190};
+        userPos.current=npos;
       }
 
-      // eat biscuit/pill
-      const ns = next(userPosRef.current, userDirRef.current);
-      const block = mapRef.current[ns.y]?.[ns.x];
-      const isMid = (v: number) => { const r = v % 10; return r > 3 || r < 7; };
-      if ((isMid(userPosRef.current.x) || isMid(userPosRef.current.y)) && (block === BISCUIT || block === PILL)) {
-        mapRef.current[ns.y][ns.x] = EMPTY;
-        const add = block === BISCUIT ? 10 : 50;
-        setScore((s) => {
-          const n = s + add;
-          if (n >= 10000 && s < 10000) setLives((v) => v + 1);
+      // EAT TILE
+      const ns=next(userPos.current,userDir.current);
+      const block=mapRef.current[ns.y]?.[ns.x];
+      const mid=(v:number)=>{const r=v%10; return r>3||r<7;};
+      if((mid(userPos.current.x)||mid(userPos.current.y)) && (block===BISCUIT||block===PILL)){
+        mapRef.current[ns.y][ns.x]=EMPTY;
+        setScore(sv=>{
+          const add=block===BISCUIT?10:50;
+          const n=sv+add;
+          if(n>=10000 && sv<10000) setLives(v=>v+1);
           return n;
         });
-        eatenCountRef.current += 1;
-        if (eatenCountRef.current === 182) completedLevel();
-        if (block === PILL) eatenPill();
+        eatenCountRef.current++;
+        if(eatenCountRef.current===182){ setLevel(l=>l+1); mapRef.current=clone2D(MAP); startLevel(); }
+        if(block===PILL) eatenPill();
       }
 
-      // collisions
-      const collided = (u: Vec, g: Vec) => Math.hypot(g.x - u.x, g.y - u.y) < 10;
-      for (const g of ghostsRef.current) {
-        if (collided(userPosRef.current, g.pos)) {
-          if (g.eatableTick !== null) {
+      // COLLISION
+      const hit=(a:Vec,b:Vec)=>Math.hypot(b.x-a.x,b.y-a.y)<10;
+      for(const g of ghosts.current){
+        if(hit(userPos.current,g.pos)){
+          if(g.eatable!=null){
             audio.play("eatghost");
-            g.eatableTick = null;
-            g.eatenTick = getTick();
-            const idx = Math.min(eatenCountRef.current, 4);
-            const combo = [200, 400, 800, 1600][Math.max(0, idx - 1)];
-            setScore((s) => s + combo);
-            setState(EATEN_PAUSE);
-            timerStartRef.current = getTick();
-          } else if (g.eatenTick === null) {
+            g.eatable=null; g.eaten=getTick();
+            setScore(sv=>sv+200);
+            setState(EATEN_PAUSE); timerStartRef.current=getTick();
+          } else if(g.eaten==null){
             audio.play("die");
-            setState(DYING);
-            timerStartRef.current = getTick();
+            setState(DYING); timerStartRef.current=getTick();
             break;
           }
         }
       }
-    } else if (state === WAITING && stateChangedRef.current) {
-      stateChangedRef.current = false;
-      dialog(fx, "Press N/Space to start");
-    } else if (state === EATEN_PAUSE && getTick() - timerStartRef.current > FPS / 3) {
+    } else if(state===WAITING){
+      drawDialog(fx,"Press N/Space (or Start) to play");
+    } else if(state===EATEN_PAUSE && getTick()-timerStartRef.current>FPS/3){
       setState(PLAYING);
-    } else if (state === DYING) {
-      if (getTick() - timerStartRef.current > FPS * 2) {
-        loseLife(fx);
-      } else {
-        drawUserDead(fx, (getTick() - timerStartRef.current) / (FPS * 2));
-      }
-    } else if (state === COUNTDOWN) {
-      const diff = 5 + Math.floor((timerStartRef.current - getTick()) / FPS);
-      if (diff === 0) setState(PLAYING);
-      else if (diff !== lastCountdownRef.current) {
-        lastCountdownRef.current = diff;
-        dialog(fx, `Starting in: ${diff}`);
-      }
+    } else if(state===DYING){
+      if(getTick()-timerStartRef.current>FPS*2){ loseLife(fx); }
+      else drawUserDead(fx,(getTick()-timerStartRef.current)/(FPS*2));
+    } else if(state===COUNTDOWN){
+      const diff=5 + Math.floor((timerStartRef.current-getTick())/FPS);
+      if(diff===0) setState(PLAYING);
+      else if(diff!==lastCountdownRef.current){ lastCountdownRef.current=diff; drawDialog(fx,`Starting in: ${diff}`); }
     }
 
-    // draw entities each frame (layer cleaned above)
-    ghostsRef.current.forEach((g) => drawGhost(fx, g));
+    // entities & HUD
+    ghosts.current.forEach(g=>drawGhost(fx,g));
     drawUser(fx);
     drawFooter(fx);
 
-    // tick++ (only if not paused)
-    if (state !== PAUSE) tickRef.current += 1;
-    pillPulseRef.current = (pillPulseRef.current + 1) % 31;
+    // tick & pulse
+    if(state!==PAUSE) tickRef.current++;
+    pulseRef.current=(pulseRef.current+1)%31;
   };
 
-  /** rAF main loop (fixed timestep) */
-  const frame = (ts: number) => {
-    if (!lastTimeRef.current) lastTimeRef.current = ts;
-    const dt = ts - lastTimeRef.current;
-    lastTimeRef.current = ts;
-    accRef.current += dt;
-
-    while (accRef.current >= STEP_MS) {
-      step();
-      accRef.current -= STEP_MS;
-    }
-
-    rafRef.current = window.requestAnimationFrame(frame);
+  /** rAF */
+  const raf=useRef<number|undefined>(undefined);
+  const lastT=useRef(0), acc=useRef(0);
+  const loop=(ts:number)=>{
+    if(!lastT.current) lastT.current=ts;
+    const dt=ts-lastT.current; lastT.current=ts; acc.current+=dt;
+    while(acc.current>=STEP_MS){ step(); acc.current-=STEP_MS; }
+    raf.current=requestAnimationFrame(loop);
   };
 
-  /** Effects */
-  const handleStart = () => startNewGame();
+  /** effects */
+  // audio
+  useEffect(()=>{ audio.loadAll(()=>setAudioReady(true)); return ()=>audio.stopAll(); },[]);
 
-  // responsive (set canvas size and redraw BG)
-  useEffect(() => {
-    const parent = fxRef.current?.parentElement;
-    const resize = () => {
-      if (!bgRef.current || !fxRef.current || !parent) return;
-      const block = Math.floor(parent.clientWidth / 19);
-      blockSizeRef.current = Math.max(14, Math.min(block, 28));
-      const w = blockSizeRef.current * 19;
-      const h = blockSizeRef.current * 22 + 30;
-      [bgRef.current, fxRef.current].forEach((c) => {
-        c.width = w;
-        c.height = h;
-      });
-      const bg = bgRef.current.getContext("2d");
-      if (bg) drawBG(bg);
-      const fx = fxRef.current.getContext("2d");
-      if (fx) { fx.clearRect(0, 0, w, h); drawFooter(fx); }
+  // size & BG
+  useEffect(()=>{
+    const parent=fxRef.current?.parentElement;
+    const resize=()=>{
+      if(!bgRef.current||!fxRef.current||!parent) return;
+      const width=parent.clientWidth;
+      blockSizeRef.current=Math.max(14, Math.min(Math.floor(width/19), 28));
+      const w=blockSizeRef.current*19, h=blockSizeRef.current*22+30;
+      [bgRef.current,fxRef.current].forEach(c=>{ c.width=w; c.height=h; c.style.width="100%"; c.style.height="auto"; });
+      drawBG();
+      const fx=fxRef.current.getContext("2d"); fx?.clearRect(0,0,w,h);
     };
     resize();
-    const ro = new ResizeObserver(resize);
-    if (parent) ro.observe(parent);
-    return () => ro.disconnect();
-  }, []);
+    const ro=new ResizeObserver(resize); parent&&ro.observe(parent);
+    return ()=>ro.disconnect();
+  },[]);
 
-  // load audio
-  useEffect(() => {
-    audio.loadAll(() => setLoaded(true));
-    return () => audio.disable();
+  // rAF
+  useEffect(()=>{
+    if(raf.current) cancelAnimationFrame(raf.current);
+    lastT.current=0; acc.current=0; raf.current=requestAnimationFrame(loop);
+    return ()=>{ if(raf.current) cancelAnimationFrame(raf.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // rAF start/stop
-  useEffect(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    lastTimeRef.current = 0;
-    accRef.current = 0;
-    rafRef.current = requestAnimationFrame(frame);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, level, score, lives, loaded]);
+  },[state,level,score,lives,audioReady]);
 
   // keyboard
-  useEffect(() => {
-    const keyDown = (e: KeyboardEvent) => {
-      if (e.keyCode === KEY.N || (e.keyCode === 32 && state === WAITING)) {
-        startNewGame();
-        e.preventDefault(); e.stopPropagation(); return false as unknown as boolean;
-      } else if (e.keyCode === KEY.S) {
-        audio.disable();
-        const flag = localStorage.getItem("soundDisabled") === "true";
-        localStorage.setItem("soundDisabled", (!flag).toString());
-      } else if (e.keyCode === KEY.P && state === PAUSE) {
-        audio.resume(); setState(WAITING);
-      } else if (e.keyCode === KEY.P) {
-        setState(PAUSE); audio.pause();
-      } else if (state !== PAUSE) {
-        const km: Record<number, number> = {
-          [KEY.ARROW_LEFT]: LEFT, [KEY.ARROW_UP]: UP, [KEY.ARROW_RIGHT]: RIGHT, [KEY.ARROW_DOWN]: DOWN,
-          65: LEFT, 87: UP, 68: RIGHT, 83: DOWN, // WASD
-        };
-        const d = km[e.keyCode];
-        if (typeof d !== "undefined") { userDueRef.current = d; e.preventDefault(); e.stopPropagation(); return false as unknown as boolean; }
-      }
-      return true as unknown as boolean;
+  useEffect(()=>{
+    const KD=(e:KeyboardEvent)=>{
+      if((e.key===" " || e.key==="n" || e.key==="N") && state===WAITING){ startNew(); e.preventDefault(); return; }
+      if(e.key==="s"||e.key==="S"){ const cur=localStorage.getItem("soundDisabled")==="true"; localStorage.setItem("soundDisabled",(!cur).toString()); }
+      if(e.key==="p"||e.key==="P"){ setState(s=>s===PAUSE?WAITING:PAUSE); if(state===PAUSE) audio.resume(); else audio.pause(); }
+      if(state===PAUSE) return;
+      const map:Record<number,number>={[37]:LEFT,[38]:UP,[39]:RIGHT,[40]:DOWN,65:LEFT,87:UP,68:RIGHT,83:DOWN};
+      const d=map[e.keyCode]; if(typeof d!=="undefined"){ userDue.current=d; e.preventDefault(); }
     };
-    const keyPress = (e: KeyboardEvent) => {
-      if (state !== WAITING && state !== PAUSE) { e.preventDefault(); e.stopPropagation(); }
+    const KP=(e:KeyboardEvent)=>{ if(state!==WAITING&&state!==PAUSE){ e.preventDefault(); } };
+    document.addEventListener("keydown",KD,{capture:true});
+    document.addEventListener("keypress",KP,{capture:true});
+    return ()=>{ document.removeEventListener("keydown",KD,true); document.removeEventListener("keypress",KP,true); };
+  },[state,audio]);
+
+  // swipe anti-scroll
+  useEffect(()=>{
+    const el=fxRef.current; if(!el) return;
+    let sx=0,sy=0,active=false; const TH=20;
+    const dir=(dx:number,dy:number)=>Math.abs(dx)>Math.abs(dy)?(dx>0?RIGHT:LEFT):(dy>0?DOWN:UP);
+    const start=(e:TouchEvent)=>{ active=true; sx=e.touches[0].clientX; sy=e.touches[0].clientY; e.preventDefault(); };
+    const move =(e:TouchEvent)=>{ if(!active) return; const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
+      if(Math.abs(dx)<TH && Math.abs(dy)<TH){ e.preventDefault(); return; }
+      userDue.current=dir(dx,dy); active=false; e.preventDefault();
     };
-    document.addEventListener("keydown", keyDown, true);
-    document.addEventListener("keypress", keyPress, true);
-    return () => { document.removeEventListener("keydown", keyDown, true); document.removeEventListener("keypress", keyPress, true); };
-  }, [state, audio]);
-
-  // swipe (prevent scroll)
-  useEffect(() => {
-    const el = fxRef.current;
-    if (!el) return;
-    let sx = 0, sy = 0, active = false;
-    const TH = 20;
-    const dirFrom = (dx: number, dy: number) =>
-      Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? RIGHT : LEFT) : dy > 0 ? DOWN : UP;
-
-    const onStart = (e: TouchEvent) => { active = true; sx = e.touches[0].clientX; sy = e.touches[0].clientY; e.preventDefault(); };
-    const onMove = (e: TouchEvent) => {
-      if (!active) return;
-      const dx = e.touches[0].clientX - sx;
-      const dy = e.touches[0].clientY - sy;
-      if (Math.abs(dx) < TH && Math.abs(dy) < TH) { e.preventDefault(); return; }
-      userDueRef.current = dirFrom(dx, dy);
-      active = false;
-      e.preventDefault();
-    };
-    const onEnd = (e: TouchEvent) => { active = false; e.preventDefault(); };
-
-    el.addEventListener("touchstart", onStart, { passive: false });
-    el.addEventListener("touchmove", onMove, { passive: false });
-    el.addEventListener("touchend", onEnd, { passive: false });
-    return () => {
-      el.removeEventListener("touchstart", onStart);
-      el.removeEventListener("touchmove", onMove);
-      el.removeEventListener("touchend", onEnd);
-    };
-  }, []);
-
-  // post score to parent
-  useEffect(() => {
-    try { window.parent?.postMessage({ __monadGame: true, type: "score", payload: { score }, sessionId: "react" }, "*"); } catch {}
-  }, [score]);
+    const end  =(e:TouchEvent)=>{ active=false; e.preventDefault(); };
+    el.addEventListener("touchstart",start,{passive:false});
+    el.addEventListener("touchmove",move,{passive:false});
+    el.addEventListener("touchend", end ,{passive:false});
+    return ()=>{ el.removeEventListener("touchstart",start); el.removeEventListener("touchmove",move); el.removeEventListener("touchend",end); };
+  },[]);
 
   return (
     <div className="space-y-3">
@@ -803,43 +526,33 @@ export default function ClassicPacman({
         {username ? (
           <div className="px-2 py-1 rounded bg-neutral-900/70 border border-neutral-800">@{username}</div>
         ) : wallet ? (
-          <a
-            className="px-3 py-1 rounded bg-yellow-400 text-black hover:bg-yellow-300"
-            href="https://monad-games-id-site.vercel.app/"
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a className="px-3 py-1 rounded bg-yellow-400 text-black hover:bg-yellow-300" href="https://monad-games-id-site.vercel.app/" target="_blank" rel="noreferrer">
             Reserve your Monad Games ID username
           </a>
         ) : null}
       </div>
 
-      <div className="relative w-full rounded-2xl border border-neutral-800 bg-black shadow-inner p-2 overflow-hidden">
-        {state === WAITING && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60">
-            {isMobile ? (
-              <button
-                onClick={startNewGame}
-                className="px-5 py-3 rounded-2xl bg-yellow-400 text-black font-medium hover:bg-yellow-300 active:scale-[0.99]"
-              >
-                Start
-              </button>
-            ) : (
-              <div className="px-4 py-2 rounded-2xl bg-neutral-900/80 border border-neutral-700 text-neutral-200">
-                Press <span className="font-semibold">Space</span> to Start
-              </div>
-            )}
+      {/* wrapper TANPA padding; overlay canvas 1:1 */}
+      <div className="relative w-full rounded-2xl border border-neutral-800 bg-black shadow-inner overflow-hidden">
+        {state===WAITING && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50">
+            <button
+              onClick={startNew}
+              className="px-5 py-3 rounded-2xl bg-yellow-400 text-black font-medium hover:bg-yellow-300 active:scale-[0.99]"
+            >
+              Start
+            </button>
           </div>
         )}
-
-        {/* BG & FX layers */}
-        <canvas ref={bgRef} className="w-full h-auto block rounded-md select-none touch-none absolute inset-2 pointer-events-none" />
-        <canvas ref={fxRef} className="w-full h-auto block rounded-md select-none touch-none relative" />
+        <div className="relative w-full">
+          <canvas ref={bgRef} className="block w-full h-auto absolute inset-0 select-none touch-none" />
+          <canvas ref={fxRef} className="block w-full h-auto absolute inset-0 select-none touch-none" />
+        </div>
       </div>
 
-      <div className="text-xs text-neutral-400">
-        <p>Controls: Arrow / WASD • Mobile: swipe • Space/N = Start • P = Pause • S = Toggle Sound</p>
-      </div>
+      <p className="text-xs text-neutral-400">
+        Controls: Arrow / WASD • Mobile: swipe • Space/N = Start • P = Pause • S = Toggle Sound
+      </p>
     </div>
   );
 }
