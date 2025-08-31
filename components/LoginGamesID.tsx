@@ -8,13 +8,19 @@ export default function LoginGamesID({ onWallet }: { onWallet: (addr: string | n
   const [address, setAddress] = useState<string | null>(null);
   const CROSS_APP_ID = process.env.NEXT_PUBLIC_PRIVY_CROSS_APP_ID || "cmd8euall0037le0my79qpz42";
 
-  // Type guard untuk menyaring akun cross_app yang cocok dengan Cross App ID
+  // Type guard: pastikan item adalah CrossAppAccountWithMetadata dg providerApp id yg cocok
+  const isCrossForMonad = (
+    a: unknown
+  ): a is CrossAppAccountWithMetadata => {
+    return !!a && typeof a === "object" &&
+      (a as any).type === "cross_app" &&
+      (a as any).providerApp &&
+      (a as any).providerApp.id === CROSS_APP_ID;
+  };
+
   const crossAppAccount = useMemo(() => {
     const list = user?.linkedAccounts ?? [];
-    const matches = list.filter(
-      (a): a is CrossAppAccountWithMetadata =>
-        a.type === "cross_app" && (a as CrossAppAccountWithMetadata).providerApp?.id === CROSS_APP_ID
-    );
+    const matches = list.filter(isCrossForMonad);
     return matches[0] ?? null;
   }, [user, CROSS_APP_ID]);
 
