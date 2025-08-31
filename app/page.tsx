@@ -1,90 +1,177 @@
-// app/page.tsx
 "use client";
 
+import { useEffect, useRef, useState, useCallback } from "react";
 import ClassicPacman from "@/components/pacman/ClassicPacman";
-import HeaderBar from "@/components/ui/HeaderBar";
-import { usePrivy, CrossAppAccountWithMetadata, LinkedAccount } from "@privy-io/react-auth";
-import { useEffect, useMemo, useState } from "react";
-import { getUsernameForWallet } from "@/lib/username";
-
-const MONAD_CROSS_APP_ID = "cmd8euall0037le0my79qpz42";
-
-function isCrossAppAccount(
-  acc: LinkedAccount | CrossAppAccountWithMetadata | undefined
-): acc is CrossAppAccountWithMetadata {
-  return !!acc && acc.type === "cross_app" && "providerApp" in acc && !!acc.providerApp;
-}
 
 export default function HomePage() {
-  const { user, authenticated, login, logout } = usePrivy(); // removed `ready`
+  const [wallet, setWallet] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  const [loadingUser, setLoadingUser] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [gameOver, setGameOver] = useState(false);
+  const [lastScore, setLastScore] = useState(0);
 
-  // Ambil wallet dari Cross App (Monad Games ID) dengan tipe aman
-  const wallet = useMemo(() => {
-    if (!authenticated || !user) return null;
+  const playedSinceRef = useRef<number | null>(null);
 
-    const crossAcc = user.linkedAccounts.find(
-      (a) => a.type === "cross_app" && "providerApp" in a && (a as CrossAppAccountWithMetadata).providerApp?.id === MONAD_CROSS_APP_ID
-    );
-
-    if (!isCrossAppAccount(crossAcc)) return null;
-
-    const addr = crossAcc.embeddedWallets?.[0]?.address;
-    return typeof addr === "string" && addr.startsWith("0x") ? addr : null;
-  }, [authenticated, user]);
-
-  useEffect(() => {
-    let canceled = false;
-    (async () => {
-      if (!wallet) {
-        setUsername(null);
-        return;
-      }
-      const uname = await getUsernameForWallet(wallet);
-      if (!canceled) setUsername(uname);
-    })();
-    return () => {
-      canceled = true;
-    };
-  }, [wallet]);
-
-  async function submitDeltaScore(delta: number, playedMs?: number) {
-    if (!wallet || delta <= 0) return;
+  // --- Cek username dari API monad-games-id-site ---
+  const checkUsername = useCallback(async (addr: string) => {
     try {
-      const res = await fetch("/api/submit-score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet,
-          deltaScore: delta, // delta-only, BUKAN total
-          deltaTx: 0,
-          level: 1, // bisa diisi dari state level game kamu
-          playedMs: playedMs ?? 0,
-        }),
-      });
-      // optional: gunakan response untuk toast/telemetry
-      // const json = await res.json();
-      // console.log("submit score:", json);
-    } catch {
-      // swallow: biar tidak ganggu gameplay
+      setLoadingUser(true);
+      const res = await fetch(
+        `https://monad-games-id-site.vercel.app/api/check-wallet?wallet=${addr}`
+      );
+      if (!res.ok) throw new Error("Failed to check username");
+      const data = await res.json();
+      if (data.hasUsername) {
+        setUsername(data.user.username);
+      } else {
+        setUsername(null);
+      }
+    } catch (err) {
+      console.error(err);
+      setUsername(null);
+    } finally {
+      setLoadingUser(false);
     }
-  }
+  }, []);
+
+  // --- Simulasi get wallet address (ganti sesuai integrasi real Privy/MetaMask/PrivyAuth dsb) ---
+  useEffect(() => {
+    const demoWallet = "0xC665F5bBb5435Bd4d3d60419fA260355cE47256B";
+    setWallet(demoWallet);
+    checkUsername(demoWallet);
+  }, [checkUsername]);
+
+  // --- Submit score delta ke API backend ---
+  const handleSubmitScore = useCallback(
+    async (deltaScore: number) => {
+      if (!wallet || deltaScore <= 0) return;
+
+      const playedMs =
+        playedSinceRef.current != null
+          ? Date.now() - playedSinceRef.current
+          : 0;
+
+      try {
+        const res = await fetch("/api/submit-score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wallet,
+            deltaScore,
+            deltaTx: 0,
+            level: 1,
+            playedMs,
+          }),
+        });
+        const json = await res.json();
+        console.log("Score submit result:", json);
+      } catch (err) {
+        console.error("Submit score error:", err);
+      }
+    },
+    [wallet]
+  );
+
+  // --- Handler game events dari ClassicPacman ---
+  const handleGameStart = useCallback(() => {
+    setGameStarted(true);
+    setPaused(false);
+    setGameOver(false);
+    playedSinceRef.current = Date.now();
+  }, []);
+
+  const handleGamePause = useCallback(() => {
+    setPaused((p) => !p);
+  }, []);
+
+  const handleGameOver = useCallback(
+    (finalScore: number) => {
+      setGameOver(true);
+      setGameStarted(false);
+      setLastScore(finalScore);
+      playedSinceRef.current = null;
+      // submit delta akhir
+      handleSubmitScore(finalScore);
+    },
+    [handleSubmitScore]
+  );
+
+  const handlePlayAgain = useCallback(() => {
+    setGameStarted(true);
+    setPaused(false);
+    setGameOver(false);
+    setLastScore(0);
+    playedSinceRef.current = Date.now();
+  }, []);
+
+  // --- Keyboard shortcut (space start) untuk desktop ---
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !gameStarted && !gameOver) {
+        handleGameStart();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [gameStarted, gameOver, handleGameStart]);
 
   return (
-    <main className="min-h-screen bg-black text-neutral-200">
-      <HeaderBar
-        authenticated={authenticated}
-        username={username}
-        onLogin={login}
-        onLogout={logout}
-      />
-      <div className="mx-auto max-w-[820px] px-4 py-6">
-        <ClassicPacman
-          wallet={wallet}
-          username={username}
-          onScoreSubmit={(delta) => submitDeltaScore(delta)}
-        />
-      </div>
+    <main className="flex flex-col items-center justify-center min-h-screen bg-black text-yellow-400 p-4">
+      <h1 className="text-3xl font-bold mb-2">Monad Pacman</h1>
+
+      {loadingUser ? (
+        <p className="text-gray-300 mb-2">Checking username...</p>
+      ) : username ? (
+        <p className="mb-4">Welcome, {username}!</p>
+      ) : (
+        <button className="mb-4 px-4 py-2 bg-blue-600 rounded">
+          Reserve your Monad Games ID
+        </button>
+      )}
+
+      {!gameStarted && !gameOver && (
+        <div className="flex gap-4 mb-4">
+          <button
+            onClick={handleGameStart}
+            className="px-4 py-2 bg-green-600 rounded"
+          >
+            ▶ Start
+          </button>
+        </div>
+      )}
+
+      {gameStarted && (
+        <>
+          <ClassicPacman
+            paused={paused}
+            onGameOver={handleGameOver}
+            onScore={(delta) => handleSubmitScore(delta)}
+          />
+          <div className="flex gap-4 mt-4">
+            <button
+              onClick={handleGamePause}
+              className="px-4 py-2 bg-yellow-600 rounded"
+            >
+              {paused ? "Resume" : "Pause"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {gameOver && (
+        <div className="mt-6 text-center">
+          <h2 className="text-2xl mb-2">Game Over</h2>
+          <p className="mb-4">Your Score: {lastScore}</p>
+          <button
+            onClick={handlePlayAgain}
+            className="px-4 py-2 bg-green-600 rounded"
+          >
+            🔄 Play Again
+          </button>
+        </div>
+      )}
     </main>
   );
 }
