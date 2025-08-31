@@ -107,6 +107,16 @@ const WALLS: WallCmd[][] = [
 
 const clone2D = (src: number[][]) => src.map((r) => r.slice());
 
+/** Ghost type */
+type Ghost = {
+  pos: Vec;
+  dir: number;
+  due: number;
+  eatableTick: number | null;
+  eatenTick: number | null;
+  colour: string;
+};
+
 /** ================== Audio Manager ================== */
 function useAudio(rootBase: string) {
   const filesRef = useRef<Record<string, HTMLAudioElement>>({});
@@ -168,7 +178,7 @@ function useAudio(rootBase: string) {
 export default function ClassicPacman({
   wallet,
   username,
-  onScoreSubmit, // now used on GAME_OVER
+  onScoreSubmit,
   rootAssetBase = "https://raw.githubusercontent.com/daleharvey/pacman/master/",
 }: {
   wallet: string | null;
@@ -208,40 +218,44 @@ export default function ClassicPacman({
   const userDirRef = useRef<number>(LEFT);
   const userDueRef = useRef<number>(LEFT);
 
-  type Ghost = { pos: Vec; dir: number; due: number; eatableTick: number | null; eatenTick: number | null; colour: string };
   const ghostsRef = useRef<Ghost[]>([]);
-  const ghostColours = ["#FF0000", "#FFB8DE", "#00FFDE", "#FFB847"];
+  const ghostColours = useMemo<string[]>(
+    () => ["#FF0000", "#FFB8DE", "#00FFDE", "#FFB847"],
+    []
+  );
 
   const audio = useAudio(rootAssetBase);
 
   /** helpers */
-  const getTick = () => tickRef.current;
-  const pointToCoord = (x: number) => Math.round(x / 10);
-  const onWhole = (x: number) => x % 10 === 0;
-  const onGrid = (p: Vec) => onWhole(p.x) && onWhole(p.y);
-  const nextSquare = (x: number, dir: number) => {
+  const getTick = useCallback(() => tickRef.current, []);
+
+  const pointToCoord = useCallback((x: number) => Math.round(x / 10), []);
+  const onWhole = useCallback((x: number) => x % 10 === 0, []);
+  const onGrid = useCallback((p: Vec) => onWhole(p.x) && onWhole(p.y), [onWhole]);
+  const nextSquare = useCallback((x: number, dir: number) => {
     const rem = x % 10;
     if (rem === 0) return x;
     if (dir === RIGHT || dir === DOWN) return x + (10 - rem);
     return x - rem;
-  };
-  const next = (pos: Vec, dir: number) => ({ y: pointToCoord(nextSquare(pos.y, dir)), x: pointToCoord(nextSquare(pos.x, dir)) });
+  }, []);
+  const next = useCallback((pos: Vec, dir: number) => ({ y: pointToCoord(nextSquare(pos.y, dir)), x: pointToCoord(nextSquare(pos.x, dir)) }), [pointToCoord, nextSquare]);
 
-  const within = (h: number, w: number, y: number, x: number) => y >= 0 && y < h && x >= 0 && x < w;
-  const isWall = (pos: { y: number; x: number }) =>
-    within(mapRef.current.length, mapRef.current[0].length, pos.y, pos.x) && mapRef.current[pos.y][pos.x] === WALL;
-  const isFloor = (pos: { y: number; x: number }) => {
+  const within = useCallback((h: number, w: number, y: number, x: number) => y >= 0 && y < h && x >= 0 && x < w, []);
+  const isWall = useCallback((pos: { y: number; x: number }) =>
+    within(mapRef.current.length, mapRef.current[0].length, pos.y, pos.x) && mapRef.current[pos.y][pos.x] === WALL,
+  [within]);
+  const isFloor = useCallback((pos: { y: number; x: number }) => {
     if (!within(mapRef.current.length, mapRef.current[0].length, pos.y, pos.x)) return false;
     const v = mapRef.current[pos.y][pos.x];
     return v === EMPTY || v === BISCUIT || v === PILL;
-  };
-  const pane = (pos: Vec, dir: number): Vec | false => {
+  }, [within]);
+  const pane = useCallback((pos: Vec, dir: number): Vec | false => {
     if (pos.y === 100 && pos.x >= 190 && dir === RIGHT) return { y: 100, x: -10 };
     if (pos.y === 100 && pos.x <= -10 && dir === LEFT) return { y: 100, x: 190 };
     return false;
-  };
+  }, []);
 
-  /** drawing callbacks (memoized for eslint deps) */
+  /** drawing callbacks */
   const drawWalls = useCallback((ctx: CanvasRenderingContext2D) => {
     const s = blockSizeRef.current;
     ctx.save();
@@ -380,7 +394,7 @@ export default function ClassicPacman({
     ctx.fill();
   }, []);
 
-  const drawGhost = useCallback((ctx: CanvasRenderingContext2D, g: any) => {
+  const drawGhost = useCallback((ctx: CanvasRenderingContext2D, g: Ghost) => {
     const s = blockSizeRef.current;
     const top = (g.pos.y / 10) * s;
     const left = (g.pos.x / 10) * s;
@@ -429,40 +443,42 @@ export default function ClassicPacman({
     ctx.arc(left + s - 6 + o[0], top + 6 + o[1], s / 15, 0, 300, false);
     ctx.closePath();
     ctx.fill();
-  }, []);
+  }, [getTick]);
 
   /** movement helpers */
-  const userNewCoord = (dir: number, cur: Vec): Vec => ({
+  const userNewCoord = useCallback((dir: number, cur: Vec): Vec => ({
     x: cur.x + ((dir === LEFT && -2) || (dir === RIGHT && 2) || 0),
     y: cur.y + ((dir === DOWN && 2) || (dir === UP && -2) || 0),
-  });
+  }), []);
 
-  const ghostAddBounded = (x1: number, x2: number) => {
+  const ghostAddBounded = useCallback((x1: number, x2: number) => {
     const rem = x1 % 10;
     const result = rem + x2;
     if (rem !== 0 && result > 10) return x1 + (10 - rem);
     if (rem > 0 && result < 0) return x1 - rem;
     return x1 + x2;
-  };
+  }, []);
 
-  const ghostSpeedForLevel = (g: any) => {
+  const ghostSpeedForLevel = useCallback((g: Ghost) => {
     const base = g.eatableTick !== null ? 1 : g.eatenTick !== null ? 4 : 2;
     return Math.min(4, base + (level - 1) * 0.15);
-  };
+  }, [level]);
 
-  const ghostNewCoord = (dir: number, cur: Vec, g: any): Vec => {
+  const ghostNewCoord = useCallback((dir: number, cur: Vec, g: Ghost): Vec => {
     const speed = ghostSpeedForLevel(g);
     const xSpeed = dir === LEFT ? -speed : dir === RIGHT ? speed : 0;
     const ySpeed = dir === DOWN ? speed : dir === UP ? -speed : 0;
     return { x: ghostAddBounded(cur.x, xSpeed), y: ghostAddBounded(cur.y, ySpeed) };
-  };
+  }, [ghostAddBounded, ghostSpeedForLevel]);
 
-  const ghostOpposite = (dir: number) =>
-    (dir === LEFT && RIGHT) || (dir === RIGHT && LEFT) || (dir === UP && DOWN) || UP;
+  const ghostOpposite = useCallback((dir: number) =>
+    (dir === LEFT && RIGHT) || (dir === RIGHT && LEFT) || (dir === UP && DOWN) || UP,
+  []);
 
-  const isOnSamePlane = (a: number, b: number) =>
+  const isOnSamePlane = useCallback((a: number, b: number) =>
     ((a === LEFT || a === RIGHT) && (b === LEFT || b === RIGHT)) ||
-    ((a === UP || a === DOWN) && (b === UP || b === DOWN));
+    ((a === UP || a === DOWN) && (b === UP || b === DOWN)),
+  []);
 
   /** gameplay handlers */
   const eatenPill = useCallback(() => {
@@ -470,12 +486,12 @@ export default function ClassicPacman({
     timerStartRef.current = getTick();
     eatenCountRef.current = 0;
     ghostsRef.current = ghostsRef.current.map((g) => ({ ...g, dir: ghostOpposite(g.dir), eatableTick: getTick() }));
-  }, [audio]);
+  }, [audio, getTick, ghostOpposite]);
 
   const completedLevel = useCallback(() => {
     setState(LEVEL_CLEAR);
     timerStartRef.current = getTick();
-  }, []);
+  }, [getTick]);
 
   const goNextLevel = useCallback(() => {
     setLevel((lv) => lv + 1);
@@ -483,11 +499,13 @@ export default function ClassicPacman({
     userPosRef.current = { x: 90, y: 120 };
     userDirRef.current = LEFT;
     userDueRef.current = LEFT;
+    // start new level
+    // (call AFTER updating state, this function depends on startLevel)
     startLevel();
-  }, []);
+  }, [/* startLevel added below by definition order */]);
 
   const startLevel = useCallback(() => {
-    ghostsRef.current = ghostColours.map((c) => ({
+    ghostsRef.current = ghostColours.map<Ghost>((c) => ({
       pos: { x: 90, y: 80 },
       dir: Math.random() < 0.5 ? UP : DOWN,
       due: Math.random() < 0.5 ? LEFT : RIGHT,
@@ -498,7 +516,17 @@ export default function ClassicPacman({
     audio.play("start");
     timerStartRef.current = getTick();
     setState(COUNTDOWN);
-  }, [audio]);
+  }, [audio, getTick, ghostColours]);
+
+  // re-create goNextLevel with startLevel in deps
+  const goNextLevelMemo = useCallback(() => {
+    setLevel((lv) => lv + 1);
+    mapRef.current = clone2D(MAP_DATA);
+    userPosRef.current = { x: 90, y: 120 };
+    userDirRef.current = LEFT;
+    userDueRef.current = LEFT;
+    startLevel();
+  }, [startLevel]);
 
   const startNewGame = useCallback(() => {
     setLevel(1);
@@ -520,7 +548,7 @@ export default function ClassicPacman({
         setState(GAME_OVER);
         drawMap(ctx);
         drawFooter(ctx);
-        onScoreSubmit?.(score); // <-- use the prop
+        onScoreSubmit?.(score);
       }
       return left;
     });
@@ -645,7 +673,7 @@ export default function ClassicPacman({
     } else if (state === LEVEL_CLEAR) {
       dialog(ctx, `Level ${level} cleared!`);
       if (getTick() - timerStartRef.current > BASE_FPS * 2) {
-        goNextLevel();
+        goNextLevelMemo();
       }
     } else if (state === GAME_OVER) {
       dialog(ctx, `GAME OVER — Score: ${score}`);
@@ -659,7 +687,7 @@ export default function ClassicPacman({
     pillPulseRef.current = (pillPulseRef.current + 1) % 31;
   }, [
     audio, completedLevel, dialog, drawFooter, drawGhost, drawMap, drawPills, drawUser, drawUserDead,
-    eatenPill, goNextLevel, loseLife, level, score, state
+    eatenPill, goNextLevelMemo, isFloor, isOnSamePlane, isWall, next, onGrid, pointToCoord, state, level, score, ghostNewCoord
   ]);
 
   /** frame (rAF) */
@@ -783,7 +811,6 @@ export default function ClassicPacman({
     };
   }, [state]);
 
-  /** ---------- UI ---------- */
   const showStartOverlay = state === WAITING;
   const showGameOver = state === GAME_OVER;
 
@@ -854,4 +881,4 @@ export default function ClassicPacman({
       </div>
     </div>
   );
-            }
+    }
