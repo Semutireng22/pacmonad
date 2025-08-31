@@ -12,23 +12,28 @@ export default function GamesIdBar({
   onUsername: (u: string | null) => void;
 }) {
   const [wallet, setWallet] = useState<string | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
-  const [loadingUser, setLoadingUser] = useState(false);
+  const [username, setUsername] = useState<string | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
 
-  // propagate ke parent
   useEffect(() => { onWallet(wallet); }, [wallet, onWallet]);
-  useEffect(() => { onUsername(username); }, [username, onUsername]);
+  useEffect(() => { onUsername(username ?? null); }, [username, onUsername]);
 
   useEffect(() => {
     let canceled = false;
     (async () => {
-      if (!wallet) { setUsername(null); return; }
+      setError(null);
+      if (!wallet) { setUsername(undefined); return; }
       try {
-        setLoadingUser(true);
+        setUsername(undefined); // loading
         const res = await fetchUsernameForWallet(wallet);
-        if (!canceled) setUsername(res.hasUsername ? res.user!.username : null);
-      } finally {
-        if (!canceled) setLoadingUser(false);
+        if (canceled) return;
+        if (res.hasUsername && res.user?.username) {
+          setUsername(res.user.username);
+        } else {
+          setUsername(null);
+        }
+      } catch {
+        if (!canceled) { setError("Failed to check username"); setUsername(undefined); }
       }
     })();
     return () => { canceled = true; };
@@ -43,20 +48,32 @@ export default function GamesIdBar({
       <LoginGamesID onWallet={setWallet} />
 
       {wallet && (
-        username ? (
-          <div className="px-3 py-1 rounded bg-neutral-800">
-            Logged in as <b>@{username}</b>
-          </div>
-        ) : loadingUser ? (
-          <div className="px-3 py-1 rounded bg-neutral-800">Checking username…</div>
-        ) : (
-          <button
-            onClick={handleReserve}
-            className="px-3 py-1 rounded bg-yellow-400 text-black hover:bg-yellow-300"
-          >
-            Reserve your Monad Games ID username
-          </button>
-        )
+        <>
+          {username === undefined && !error && (
+            <div className="px-3 py-1 rounded bg-neutral-800">Checking username…</div>
+          )}
+
+          {typeof username === "string" && (
+            <div className="px-3 py-1 rounded bg-neutral-800">
+              Logged in as <b>@{username}</b>
+            </div>
+          )}
+
+          {username === null && (
+            <button
+              onClick={handleReserve}
+              className="px-3 py-1 rounded bg-yellow-400 text-black hover:bg-yellow-300"
+            >
+              Reserve your Monad Games ID username
+            </button>
+          )}
+
+          {error && (
+            <div className="px-3 py-1 rounded bg-red-600/30 border border-red-600/50 text-red-200">
+              {error}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
