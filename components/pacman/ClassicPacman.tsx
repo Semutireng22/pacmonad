@@ -407,8 +407,7 @@ export default function ClassicPacman({
     ctx.fill();
   };
 
-  type GhostT = ReturnType<typeof drawGhost>;
-  function drawGhost(ctx: CanvasRenderingContext2D, g: Ghost) {
+  function drawGhost(ctx: CanvasRenderingContext2D, g: Ghost): void {
     const s = blockSizeRef.current;
     const top = (g.pos.y / 10) * s;
     const left = (g.pos.x / 10) * s;
@@ -473,7 +472,6 @@ export default function ClassicPacman({
     ctx.arc(left + s - 6 + o[0], top + 6 + o[1], s / 15, 0, 300, false);
     ctx.closePath();
     ctx.fill();
-    return null as unknown as GhostT;
   }
 
   /** Movement */
@@ -489,7 +487,7 @@ export default function ClassicPacman({
     if (rem > 0 && result < 0) return x1 - rem;
     return x1 + x2;
   };
-  const ghostNewCoord = (dir: number, cur: Vec, g: Ghost): Vec => {
+  const ghostNewCoord = (dir: number, cur: Vec, g: { eatableTick: number | null; eatenTick: number | null }): Vec => {
     const speed = g.eatableTick !== null ? 1 : g.eatenTick !== null ? 4 : 2;
     const xSpeed = dir === LEFT ? -speed : dir === RIGHT ? speed : 0;
     const ySpeed = dir === DOWN ? speed : dir === UP ? -speed : 0;
@@ -770,7 +768,7 @@ export default function ClassicPacman({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, level, score, lives, loaded]);
 
-  // keyboard (Space/N start)
+  // keyboard (Space/N start + controls)
   useEffect(() => {
     const keyDown = (e: KeyboardEvent) => {
       if (e.keyCode === KEY.N) {
