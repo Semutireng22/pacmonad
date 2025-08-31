@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "missing_contract" }, { status: 500 });
     }
 
-    // Penting: pastikan alamat gameAccount SUDAH ter-register via registerGame
+    // Pastikan _game (gameAccount.address) sudah diregister via registerGame
     const hash = await serverWallet.writeContract({
       address: CONTRACT as `0x${string}`,
       abi: GAMES_ID_ABI,
@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true, txHash: hash, from: gameAccount.address });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "internal_error" }, { status: 500 });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "internal_error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
