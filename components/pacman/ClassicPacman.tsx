@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** =================== CONSTANTS =================== */
 const NONE=4,UP=3,LEFT=2,DOWN=1,RIGHT=11,WAITING=5,PAUSE=6,PLAYING=7,COUNTDOWN=8,EATEN_PAUSE=9,DYING=10;
@@ -10,7 +10,7 @@ type Vec={x:number;y:number};
 type OnScoreSubmit=(score:number)=>void;
 
 /** Tiles */
-const WALL=0,BISCUIT=1,EMPTY=2,BLOCK=3,PILL=4;
+const WALL=0,BISCUIT=1,EMPTY=2,/*BLOCK=3,*/PILL=4;
 
 /** ======== MAP & WALLS (asli, lengkap) ======== */
 const MAP:number[][]=[
@@ -38,7 +38,12 @@ const MAP:number[][]=[
 	[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 ];
 
-const WALLS:any[]=[
+/** Strong typings for wall path data (no `any`) */
+type WallMove={move:[number,number]};
+type WallLine={line:[number,number]};
+type WallCurve={curve:[number,number,number,number]};
+type WallSeg=WallMove|WallLine|WallCurve;
+const WALLS:WallSeg[][]=[
   [{"move":[0,9.5]},{"line":[3,9.5]},{"curve":[3.5,9.5,3.5,9]},{"line":[3.5,8]},{"curve":[3.5,7.5,3,7.5]},{"line":[1,7.5]},{"curve":[0.5,7.5,0.5,7]},{"line":[0.5,1]},{"curve":[0.5,0.5,1,0.5]},{"line":[9,0.5]},{"curve":[9.5,0.5,9.5,1]},{"line":[9.5,3.5]}],
   [{"move":[9.5,1]},{"curve":[9.5,0.5,10,0.5]},{"line":[18,0.5]},{"curve":[18.5,0.5,18.5,1]},{"line":[18.5,7]},{"curve":[18.5,7.5,18,7.5]},{"line":[16,7.5]},{"curve":[15.5,7.5,15.5,8]},{"line":[15.5,9]},{"curve":[15.5,9.5,16,9.5]},{"line":[19,9.5]}],
   [{"move":[2.5,5.5]},{"line":[3.5,5.5]}],
@@ -73,7 +78,6 @@ const WALLS:any[]=[
   [{"move":[8.5,9.5]},{"line":[8,9.5]},{"curve":[7.5,9.5,7.5,10]},{"line":[7.5,11]},{"curve":[7.5,11.5,8,11.5]},{"line":[11,11.5]},{"curve":[11.5,11.5,11.5,11]},{"line":[11.5,10]},{"curve":[11.5,9.5,11,9.5]},{"line":[10.5,9.5]}]
 ];
 
-/** tools */
 const clone2D=(m:number[][])=>m.map(r=>r.slice());
 
 /** =================== AUDIO =================== */
@@ -171,9 +175,9 @@ export default function ClassicPacman({
     for(const line of WALLS){
       ctx.beginPath();
       for(const seg of line){
-        if(seg.move) ctx.moveTo(seg.move[0]*s, seg.move[1]*s);
-        else if(seg.line) ctx.lineTo(seg.line[0]*s, seg.line[1]*s);
-        else if(seg.curve) ctx.quadraticCurveTo(seg.curve[0]*s, seg.curve[1]*s, seg.curve[2]*s, seg.curve[3]*s);
+        if ("move" in seg) ctx.moveTo(seg.move[0]*s, seg.move[1]*s);
+        else if ("line" in seg) ctx.lineTo(seg.line[0]*s, seg.line[1]*s);
+        else if ("curve" in seg) ctx.quadraticCurveTo(seg.curve[0]*s, seg.curve[1]*s, seg.curve[2]*s, seg.curve[3]*s);
       }
       ctx.stroke();
     }
@@ -256,7 +260,7 @@ export default function ClassicPacman({
 
   const secAgo=(tick:number|null)=> tick==null?1e9:(getTick()-tick)/FPS;
 
-  const drawGhost=(ctx:CanvasRenderingContext2D,g:Ghost)=>{
+  const drawGhost=(ctx:CanvasRenderingContext2D,g:{pos:Vec;dir:number;eatable:number|null;eaten:number|null;color:string})=>{
     const s=blockSizeRef.current, top=(g.pos.y/10)*s, left=(g.pos.x/10)*s;
     let col=g.color;
     if(g.eatable!=null) col = secAgo(g.eatable)>5 ? (getTick()%20>10?"#FFF":"#00B") : "#00B";
@@ -290,7 +294,7 @@ export default function ClassicPacman({
   /** movement helpers */
   const userCoord=(d:number,c:Vec):Vec=>({x:c.x+((d===LEFT&&-2)||(d===RIGHT&&2)||0), y:c.y+((d===DOWN&&2)||(d===UP&&-2)||0)});
   const bound=(x1:number,x2:number)=>{const r=x1%10,res=r+x2; if(r!==0&&res>10) return x1+(10-r); if(r>0&&res<0) return x1-r; return x1+x2;};
-  const ghostCoord=(d:number,c:Vec,g:Ghost):Vec=>{
+  const ghostCoord=(d:number,c:Vec,g:{eatable:number|null;eaten:number|null}):Vec=>{
     const sp=g.eatable!=null?1:g.eaten!=null?4:2;
     const xs=(d===LEFT?-sp:d===RIGHT?sp:0), ys=(d===DOWN?sp:d===UP?-sp:0);
     return {x:bound(c.x,xs), y:bound(c.y,ys)};
@@ -472,7 +476,7 @@ export default function ClassicPacman({
       const fx=fxRef.current.getContext("2d"); fx?.clearRect(0,0,w,h);
     };
     resize();
-    const ro=new ResizeObserver(resize); parent&&ro.observe(parent);
+    const ro=new ResizeObserver(resize); if(parent) ro.observe(parent);
     return ()=>ro.disconnect();
   },[]);
 
@@ -489,7 +493,7 @@ export default function ClassicPacman({
     const KD=(e:KeyboardEvent)=>{
       if((e.key===" " || e.key==="n" || e.key==="N") && state===WAITING){ startNew(); e.preventDefault(); return; }
       if(e.key==="s"||e.key==="S"){ const cur=localStorage.getItem("soundDisabled")==="true"; localStorage.setItem("soundDisabled",(!cur).toString()); }
-      if(e.key==="p"||e.key==="P"){ setState(s=>s===PAUSE?WAITING:PAUSE); if(state===PAUSE) audio.resume(); else audio.pause(); }
+      if(e.key==="p"||e.key==="P"){ setState(s=>s===PAUSE?WAITING:PAUSE); return; }
       if(state===PAUSE) return;
       const map:Record<number,number>={[37]:LEFT,[38]:UP,[39]:RIGHT,[40]:DOWN,65:LEFT,87:UP,68:RIGHT,83:DOWN};
       const d=map[e.keyCode]; if(typeof d!=="undefined"){ userDue.current=d; e.preventDefault(); }
@@ -498,7 +502,7 @@ export default function ClassicPacman({
     document.addEventListener("keydown",KD,{capture:true});
     document.addEventListener("keypress",KP,{capture:true});
     return ()=>{ document.removeEventListener("keydown",KD,true); document.removeEventListener("keypress",KP,true); };
-  },[state,audio]);
+  },[state]);
 
   // swipe anti-scroll
   useEffect(()=>{
@@ -532,7 +536,6 @@ export default function ClassicPacman({
         ) : null}
       </div>
 
-      {/* wrapper TANPA padding; overlay canvas 1:1 */}
       <div className="relative w-full rounded-2xl border border-neutral-800 bg-black shadow-inner overflow-hidden">
         {state===WAITING && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50">
