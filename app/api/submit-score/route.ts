@@ -1,59 +1,91 @@
-// app/api/submit-score/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { serverWallet, gameAccount } from "@/lib/viemServer";
-import { GAMES_ID_ABI } from "@/lib/gamesId.abi";
-import { isAddress } from "viem";
+import { z } from "zod";
+import { createPublicClient, createWalletClient, http, parseAbi, privateKeyToAccount } from "viem";
 
-export const runtime = "nodejs";           // ⬅️ pakai Node runtime (bukan Edge)
-export const dynamic = "force-dynamic";    // ⬅️ jangan pernah cache response
-export const preferredRegion = "auto";
+// ---- Konfigurasi ----
+const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_MONAD_GAMES_ID_ADDR ??
+  "0xceCBFF203C8B6044F52CE23D914A1bfD997541A4") as `0x${string}`;
 
-const CONTRACT = (process.env.GAME_CONTRACT_ADDRESS || "").toLowerCase();
-const RPC = process.env.NEXT_PUBLIC_RPC_URL;
+const ABI = parseAbi([
+  "function updatePlayerData(address player, uint256 scoreAmount, uint256 transactionAmount) external",
+]);
+
+// upper bound anti-cheat (map kita: 182 biscuit *10 + 4 pill *50 + ghost chain per pill 50+100+150+200 = 500 -> *4 = 2000)
+// total ~ 4020 → beri margin aman
+const MAX_DELTA_SCORE = 5000;
+const MAX_DELTA_TX = 50;
+// cooldown antar submit per wallet (ms)
+const SUBMIT_COOLDOWN = 1500;
+
+// in-memory limiter (serverless bisa reset — ini mitigasi ringan)
+const lastSubmitAt = new Map<string, number>();
+
+// Zod schema agar bebas "any"
+const BodySchema = z.object({
+  wallet: z.string().startsWith("0x").length(42),
+  deltaScore: z.number().int().min(0).max(MAX_DELTA_SCORE),
+  deltaTx: z.number().int().min(0).max(MAX_DELTA_TX).default(0),
+  level: z.number().int().min(1).max(256),
+  // optional telemetry ringan untuk sanity
+  playedMs: z.number().int().min(1).max(15 * 60 * 1000).optional(),
+});
 
 export async function POST(req: NextRequest) {
-  // env sanity check
-  if (!CONTRACT) return NextResponse.json({ error: "missing_contract" }, { status: 500 });
-  if (!RPC) return NextResponse.json({ error: "missing_rpc" }, { status: 500 });
-
   try {
-    const body = (await req.json()) as { player?: string; scoreDelta?: unknown; txDelta?: unknown };
+    const json = await req.json();
+    const data = BodySchema.parse(json);
 
-    const player = body?.player ?? "";
-    const scoreDeltaNum = Number(body?.scoreDelta);
-    const txDeltaNum = Number(body?.txDelta ?? 0);
-
-    if (!isAddress(player)) {
-      return NextResponse.json({ error: "bad_player" }, { status: 400 });
+    // rate limit per wallet
+    const now = Date.now();
+    const last = lastSubmitAt.get(data.wallet) ?? 0;
+    if (now - last < SUBMIT_COOLDOWN) {
+      return NextResponse.json({ ok: false, error: "Too many submits" }, { status: 429 });
     }
-    if (!Number.isFinite(scoreDeltaNum) || scoreDeltaNum <= 0 || scoreDeltaNum > 1_000_000) {
-      return NextResponse.json({ error: "bad_score" }, { status: 400 });
-    }
-    const txD = Number.isFinite(txDeltaNum) && txDeltaNum > 0 ? Math.floor(txDeltaNum) : 0;
 
-    // IMPORTANT: _game (gameAccount.address) harus sudah registerGame di kontrak
-    const txHash = await serverWallet.writeContract({
-      address: CONTRACT as `0x${string}`,
-      abi: GAMES_ID_ABI,
+    // sanity check: deltaScore wajar terhadap waktu main (opsional)
+    if (typeof data.playedMs === "number") {
+      // max 120 poin per 10 dtk sebagai guard sangat longgar (≈ 12 pts/dtk)
+      const maxByTime = Math.ceil((data.playedMs / 1000) * 12);
+      if (data.deltaScore > Math.max(800, maxByTime)) {
+        return NextResponse.json({ ok: false, error: "Unreasonable deltaScore" }, { status: 400 });
+      }
+    }
+
+    // kalau tidak ada kredensial on-chain, kita mock (tetap server-side & delta-only)
+    const rpc = process.env.MONAD_RPC_URL;
+    const pk = process.env.MONAD_GAME_SUBMITTER_PK;
+
+    lastSubmitAt.set(data.wallet, now);
+
+    if (!rpc || !pk) {
+      // mock sukses (digunakan saat dev / belum set env)
+      return NextResponse.json({
+        ok: true,
+        mocked: true,
+        submitted: { player: data.wallet, scoreAmount: data.deltaScore, transactionAmount: data.deltaTx },
+      });
+    }
+
+    // viem client
+    const transport = http(rpc);
+    const account = privateKeyToAccount(pk.startsWith("0x") ? (pk as `0x${string}`) : (`0x${pk}` as `0x${string}`));
+    const walletClient = createWalletClient({ transport, account });
+    const publicClient = createPublicClient({ transport });
+
+    // kirim tx: delta score/tx — BUKAN total
+    const hash = await walletClient.writeContract({
+      address: CONTRACT_ADDRESS,
+      abi: ABI,
       functionName: "updatePlayerData",
-      args: [player as `0x${string}`, BigInt(scoreDeltaNum), BigInt(txD)],
+      args: [data.wallet as `0x${string}`, BigInt(data.deltaScore), BigInt(data.deltaTx)],
     });
 
-    return NextResponse.json({ ok: true, txHash, from: gameAccount.address }, { status: 200 });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "internal_error";
-    console.error("[submit-score] error:", message); // ⬅️ terlihat di Vercel Logs
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+    // tunggu mined
+    await publicClient.waitForTransactionReceipt({ hash });
 
-// (opsional, bantu debugging via curl GET)
-export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    runtime,
-    contractSet: Boolean(CONTRACT),
-    rpcSet: Boolean(RPC),
-    gameAddress: gameAccount.address
-  });
+    return NextResponse.json({ ok: true, txHash: hash });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+  }
 }
