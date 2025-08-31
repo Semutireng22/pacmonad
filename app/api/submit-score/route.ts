@@ -1,13 +1,34 @@
-// app/api/submit-score/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  defineChain,
+  http,
+  parseAbi,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-// Pastikan route berjalan di Node.js (bukan Edge) karena perlu signing private key.
 export const runtime = "nodejs";
 
-// ---- Konfigurasi ----
+// ---- Chain config: Monad Testnet (ID 10143) ----
+// RPC di sini tidak dipakai untuk konstruk chain (agar type statis),
+// RPC actual tetap dari ENV (MONAD_RPC_URL) untuk koneksi client.
+const monadTestnet = defineChain({
+  id: 10143,
+  name: "Monad Testnet",
+  nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://testnet-rpc.monad.xyz"] },
+    public: { http: ["https://testnet-rpc.monad.xyz"] },
+  },
+  blockExplorers: {
+    default: { name: "Monad Explorer", url: "https://testnet.monadexplorer.com" },
+  },
+  testnet: true,
+});
+
+// ---- Konfigurasi kontrak ----
 const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_MONAD_GAMES_ID_ADDR ??
   "0xceCBFF203C8B6044F52CE23D914A1bfD997541A4") as `0x${string}`;
 
@@ -15,15 +36,12 @@ const ABI = parseAbi([
   "function updatePlayerData(address player, uint256 scoreAmount, uint256 transactionAmount) external",
 ]);
 
-// Guard anti-cheat sederhana (server-side)
+// ---- Guard anti-cheat ----
 const MAX_DELTA_SCORE = 5000;
 const MAX_DELTA_TX = 50;
 const SUBMIT_COOLDOWN = 1500; // ms
-
-// In-memory limiter (serverless bisa reset; ini mitigasi ringan)
 const lastSubmitAt = new Map<string, number>();
 
-// Validasi body
 const BodySchema = z.object({
   wallet: z.string().startsWith("0x").length(42),
   deltaScore: z.number().int().min(0).max(MAX_DELTA_SCORE),
@@ -37,14 +55,12 @@ export async function POST(req: NextRequest) {
     const json = await req.json();
     const data = BodySchema.parse(json);
 
-    // Rate-limit per wallet
     const now = Date.now();
     const last = lastSubmitAt.get(data.wallet) ?? 0;
     if (now - last < SUBMIT_COOLDOWN) {
       return NextResponse.json({ ok: false, error: "Too many submits" }, { status: 429 });
     }
 
-    // Sanity check sangat longgar berbasis waktu main (opsional)
     if (typeof data.playedMs === "number") {
       const maxByTime = Math.ceil((data.playedMs / 1000) * 12); // ≈12 pts/detik
       if (data.deltaScore > Math.max(800, maxByTime)) {
@@ -57,7 +73,7 @@ export async function POST(req: NextRequest) {
     const rpc = process.env.MONAD_RPC_URL;
     const pk = process.env.MONAD_GAME_SUBMITTER_PK;
 
-    // Jika env belum di-set, mock sukses (dev mode/preview)
+    // Jika env belum di-set, mock sukses (dev/preview)
     if (!rpc || !pk) {
       return NextResponse.json({
         ok: true,
@@ -70,21 +86,28 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // viem clients
     const transport = http(rpc);
     const account = privateKeyToAccount(
       pk.startsWith("0x") ? (pk as `0x${string}`) : (`0x${pk}` as `0x${string}`)
     );
 
-    const walletClient = createWalletClient({ transport, account });
-    const publicClient = createPublicClient({ transport });
+    const walletClient = createWalletClient({
+      account,
+      chain: monadTestnet,
+      transport,
+    });
+    const publicClient = createPublicClient({
+      chain: monadTestnet,
+      transport,
+    });
 
-    // Kirim DELTA (bukan total) ke kontrak
+    // DELTA (bukan total)
     const hash = await walletClient.writeContract({
       address: CONTRACT_ADDRESS,
       abi: ABI,
       functionName: "updatePlayerData",
       args: [data.wallet as `0x${string}`, BigInt(data.deltaScore), BigInt(data.deltaTx)],
+      // chain sudah disediakan di client
     });
 
     await publicClient.waitForTransactionReceipt({ hash });
